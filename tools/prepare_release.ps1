@@ -52,11 +52,14 @@ New-ReleaseZip 'EllisHouse-Covers' {
 Copy-Item (Join-Path $root 'ellis_house_gba.gba') (Join-Path $dist 'EllisHouse-GBA.gba') -Force
 Copy-Item (Join-Path $root 'EllisHouse.cia') (Join-Path $dist 'EllisHouse-3DS.cia') -Force
 
-$files = Get-ChildItem -LiteralPath $dist -File | Sort-Object Name
+[IO.File]::WriteAllText((Join-Path $dist 'VERSION.txt'), "$Version`n", [Text.UTF8Encoding]::new($false))
+$files = Get-ChildItem -LiteralPath $dist -File |
+    Where-Object Name -ne 'SHA256SUMS.txt' |
+    Sort-Object Name
 $lines = foreach ($file in $files) {
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     "$hash  $($file.Name)"
 }
 [IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
-[IO.File]::WriteAllText((Join-Path $dist 'VERSION.txt'), "$Version`n", [Text.UTF8Encoding]::new($false))
 Write-Output "Release files created in $dist"
+
