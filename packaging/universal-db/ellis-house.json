@@ -1,0 +1,14 @@
+{
+  "github": "glacialmoongames/EllisHouseCpp",
+  "title": "Elli's House",
+  "author": "Glacial Moon Games",
+  "description": "A haunted-house platformer originally made in GameMaker for GameJaaj 7, now ported to Nintendo 3DS.",
+  "systems": ["3DS"],
+  "categories": ["game"],
+  "unique_ids": [12116856],
+  "icon": "https://raw.githubusercontent.com/glacialmoongames/EllisHouseCpp/main/3ds/meta/icon.png",
+  "image": "https://raw.githubusercontent.com/glacialmoongames/EllisHouseCpp/main/3ds/meta/banner.png",
+  "website": "https://glacial-moon-games.itch.io/ellishouse",
+  "llm_generation": "yes",
+  "long_description": "Elli's House is a platform game originally created in GameMaker by the Glacial Moon Games team for GameJaaj 7. Programming by Annie, graphics by Pavão Gripado and IGustaMe, and music by BainoLOL. This Nintendo 3DS port was developed with AI assistance and includes stereoscopic 3D, touch-screen menus and lower-screen UI."
+}

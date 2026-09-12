@@ -1,0 +1,13 @@
+{
+  "name": "Elli's House",
+  "author": "Glacial Moon Games",
+  "category": "game",
+  "platform": "psp",
+  "install_path": "/PSP/GAME/EllisHousePSP",
+  "entrypoint": "/PSP/GAME/EllisHousePSP/EBOOT.PBP",
+  "release_asset": "EllisHouse-PSP.zip",
+  "cover": "artwork/psp/retroflow/EllisHousePSP.png",
+  "homepage": "https://glacial-moon-games.itch.io/ellishouse",
+  "description": "A haunted-house platformer originally made by Glacial Moon Games for GameJaaj 7.",
+  "ai_assistance": true
+}

@@ -1,0 +1,15 @@
+audio_sound_gain(sfx_jump,0.17,0)
+audio_sound_gain(sfx_coin,0.5,0)
+audio_sound_gain(sfx_blink,0.5,0)
+audio_sound_gain(sfx_boss2,0.5,0)
+audio_sound_gain(sfx_bossroar,0.5,0)
+audio_sound_gain(snd_01,100,0)
+audio_sound_gain(snd_02,100,0)
+audio_sound_gain(snd_03,100,0)
+audio_sound_gain(snd_04,100,0)
+audio_sound_gain(snd_05,100,0)
+audio_sound_gain(snd_06,100,0)
+audio_sound_gain(snd_boss,100,0)
+audio_sound_gain(snd_end,100,0)
+
+

@@ -1,0 +1,52 @@
+# Desktop builds
+/build/
+/build-*/
+/.cache/
+/dist/
+*.exe
+*.o
+/ellis house advance.png
+/ellis House psp.png
+
+# Generated release binaries
+/*.gba
+/*.sav
+/*.3dsx
+/*.cia
+/EllisHousePSP/
+
+# GBA generated/build output
+/gba/build/
+/gba/generated/
+
+# Nintendo 3DS generated/build output
+/3ds/build/
+/3ds/gfx_src/
+/3ds/gfx/*.t3s
+/3ds/romfs/
+/3ds/*.3dsx
+/3ds/*.elf
+/3ds/*.smdh
+/3ds/sheet*.d
+/3ds/sheet*.h
+/3ds/sheet*.t3x
+/3ds/meta/*.bnr
+/3ds/meta/*.smdh
+/3ds/meta/romfs.bin
+
+# PSP generated/build output
+/psp/boot_probe/
+/psp/iso_root/
+/psp/package/
+/psp/*.elf
+/psp/*.prx
+/psp/*.bin
+/psp/*.PBP
+/psp/*.SFO
+
+# QA captures and local files
+/qa_*.png
+*.log
+*.tmp
+__pycache__/
+*.py[cod]

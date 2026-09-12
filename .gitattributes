@@ -1,0 +1,12 @@
+* text=auto
+*.png binary
+*.bmp binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.ttf binary
+*.gba binary
+*.3dsx binary
+*.cia binary
+*.pbp binary
+*.zip binary

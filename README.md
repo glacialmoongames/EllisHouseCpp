@@ -109,4 +109,3 @@ See [ATTRIBUTION.md](ATTRIBUTION.md) for the complete public attribution text.
 No open-source license has been granted for the game, its assets or these ports.
 Unless the respective authors state otherwise, all rights remain reserved.
 Public visibility does not grant permission to redistribute or reuse its assets.
-
