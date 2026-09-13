@@ -24,11 +24,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#define DR_WAV_IMPLEMENTATION
-#include "vendor/dr_wav.h"
-#define DR_MP3_IMPLEMENTATION
-#include "vendor/dr_mp3.h"
-#include "vendor/stb_vorbis.c"
 
 namespace {
 struct Sheet { C2D_SpriteSheet handle{}; std::uint64_t lastUsedFrame{}; };
@@ -243,36 +238,20 @@ void replayMain(float shift) {
 }
 AudioClip* audioClip(unsigned id) { return id && id<=audioClips.size()?audioClips[id-1]:nullptr; }
 AudioClip* decodeAudio(const char* path,bool music) {
-    const std::string file=normalize(path);
-    int channels=0,rate=0; std::uint64_t frames=0; s16* decoded=nullptr;
-    enum class Decoder { None,Wav,Mp3,Vorbis } decoder=Decoder::None;
-    if(file.ends_with(".wav")) {
-        unsigned c=0,r=0;drwav_uint64 f=0;decoded=drwav_open_file_and_read_pcm_frames_s16(file.c_str(),&c,&r,&f,nullptr);
-        channels=(int)c;rate=(int)r;frames=f;decoder=Decoder::Wav;
-    } else if(file.ends_with(".mp3")) {
-        drmp3_config cfg{};drmp3_uint64 f=0;decoded=drmp3_open_file_and_read_pcm_frames_s16(file.c_str(),&cfg,&f,nullptr);
-        channels=(int)cfg.channels;rate=(int)cfg.sampleRate;frames=f;decoder=Decoder::Mp3;
-    } else if(file.ends_with(".ogg")) {
-        short* out=nullptr;int samples=stb_vorbis_decode_filename(file.c_str(),&channels,&rate,&out);
-        if(samples>0){decoded=out;frames=(std::uint64_t)samples;}decoder=Decoder::Vorbis;
-    }
-    if(!decoded||channels<=0||rate<=0||frames==0) return nullptr;
-    constexpr int outputRate=22050;
-    const std::uint64_t outputFrames=std::max<std::uint64_t>(1,frames*outputRate/rate);
-    auto* clip=new AudioClip;clip->frames=(u32)std::min<std::uint64_t>(outputFrames,0xffffffffu);clip->music=music;
-    clip->data=(s16*)linearAlloc((std::size_t)clip->frames*sizeof(s16));
-    if(!clip->data){delete clip;clip=nullptr;} else {
-        for(u32 i=0;i<clip->frames;i++) {
-            const std::uint64_t source=std::min<std::uint64_t>(frames-1,(std::uint64_t)i*rate/outputRate);
-            int sum=0;for(int c=0;c<channels;c++)sum+=decoded[source*channels+c];
-            clip->data[i]=(s16)(sum/channels);
-        }
-        DSP_FlushDataCache(clip->data,(std::size_t)clip->frames*sizeof(s16));
-    }
-    if(decoder==Decoder::Wav)drwav_free(decoded,nullptr);
-    else if(decoder==Decoder::Mp3)drmp3_free(decoded,nullptr);
-    else std::free(decoded);
-    return clip;
+    std::string file=normalize(path);
+    const auto slash=file.find_last_of('/');if(slash!=std::string::npos)file=file.substr(slash+1);
+    const auto dot=file.find_last_of('.');if(dot!=std::string::npos)file.resize(dot);
+    for(char& c:file)if(c>='a'&&c<='z')c=static_cast<char>(c-'a'+'A');
+    file="romfs:/audio/"+file+".PCM";
+    FILE* input=std::fopen(file.c_str(),"rb");if(!input)return nullptr;
+    std::fseek(input,0,SEEK_END);const long bytes=std::ftell(input);std::rewind(input);
+    if(bytes<=0 || (bytes&1)){std::fclose(input);return nullptr;}
+    auto* clip=new AudioClip;clip->frames=static_cast<u32>(bytes/sizeof(s16));clip->music=music;
+    clip->data=static_cast<s16*>(linearAlloc(static_cast<std::size_t>(bytes)));
+    if(!clip->data || std::fread(clip->data,1,static_cast<std::size_t>(bytes),input)!=static_cast<std::size_t>(bytes)) {
+        if(clip->data)linearFree(clip->data);delete clip;clip=nullptr;
+    } else DSP_FlushDataCache(clip->data,static_cast<std::size_t>(bytes));
+    std::fclose(input);return clip;
 }
 void musicPreloadWorker(void* argument) {
     auto* path=static_cast<std::string*>(argument);
@@ -451,7 +430,8 @@ void PreloadMusicStream(const char* path){
     // Decode on the Old 3DS system core allocation so MP3/Vorbis work cannot
     // steal the render budget. If the firmware refuses that worker, decode once
     // synchronously instead of retrying forever and leaving music silent.
-    musicPreloadThread=threadCreate(musicPreloadWorker,argument,256*1024,0x30,musicWorkerCore,false);
+    // Prepared PCM avoids codec recursion and the hardware crash caused by decoder stack pressure.
+    musicPreloadThread=threadCreate(musicPreloadWorker,argument,64*1024,0x30,musicWorkerCore,false);
     if(!musicPreloadThread) {
         delete argument;
         musicPreloadClip=decodeAudio(wanted.c_str(),true);
