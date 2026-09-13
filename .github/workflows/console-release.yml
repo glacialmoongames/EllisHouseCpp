@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ellis-house-console-release
+  cancel-in-progress: true
+
 env:
   RELEASE_TAG: v0.1.0-port-preview
 
@@ -129,9 +133,31 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  gba:
+    name: Build Game Boy Advance ROM
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deterministic asset tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pil python3-numpy python3-soundfile
+      - name: Generate assets and build optimized ROM
+        run: |
+          python3 gba/tools/generate_assets.py
+          make -C gba -j2 PYTHON=python3
+          cp ellis_house_gba.gba EllisHouse-GBA.gba
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gba-release
+          path: EllisHouse-GBA.gba
+          if-no-files-found: error
+          compression-level: 0
+
   publish:
     name: Replace GitHub release downloads
-    needs: [psp, n3ds]
+    needs: [psp, n3ds, gba]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -143,11 +169,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$RELEASE_TAG" new/EllisHouse-PSP.zip new/EllisHouse-3DSX.zip new/EllisHouse-3DS.cia --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$RELEASE_TAG" new/EllisHouse-PSP.zip new/EllisHouse-3DSX.zip new/EllisHouse-3DS.cia new/EllisHouse-GBA.gba --clobber --repo "$GITHUB_REPOSITORY"
       - name: Publish checksums for the updated console packages
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd new
-          sha256sum EllisHouse-PSP.zip EllisHouse-3DSX.zip EllisHouse-3DS.cia > SHA256-CONSOLES.txt
+          sha256sum EllisHouse-PSP.zip EllisHouse-3DSX.zip EllisHouse-3DS.cia EllisHouse-GBA.gba > SHA256-CONSOLES.txt
           gh release upload "$RELEASE_TAG" SHA256-CONSOLES.txt --clobber --repo "$GITHUB_REPOSITORY"
