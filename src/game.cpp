@@ -37,7 +37,15 @@ const std::unordered_map<std::string,std::string>& roomMusicMapping() {
 }
 
 Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), root_(std::move(root)) {
+#ifdef __EMSCRIPTEN__
+    // A resizable raylib web window adopts the browser viewport as its
+    // framebuffer. On portrait phones that creates a tall canvas which CSS
+    // then squeezes into the landscape game area. Keep the framebuffer at the
+    // game's native 2x resolution and only scale its CSS presentation.
+    SetConfigFlags(FLAG_VSYNC_HINT);
+#else
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+#endif
     InitWindow(kViewWidth * 2, kViewHeight * 2, "Elli's House");
     SetExitKey(KEY_F10);
 #ifdef __EMSCRIPTEN__
