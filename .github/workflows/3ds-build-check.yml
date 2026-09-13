@@ -1,0 +1,28 @@
+name: Nintendo 3DS compile check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - '3ds/source/**'
+      - '3ds/include/**'
+      - '3ds/Makefile'
+      - '.github/workflows/3ds-build-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare minimal ROMFS for link validation
+        run: |
+          mkdir -p 3ds/romfs/assets
+          cp assets/game.manifest 3ds/romfs/assets/game.manifest
+      - name: Compile
+        run: make -C 3ds -j2
