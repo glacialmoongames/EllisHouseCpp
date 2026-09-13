@@ -166,7 +166,10 @@ void Game::run() {
         static_cast<Game*>(context)->runFrame();
     },this,0,false);
 #else
-    while (running_ && !WindowShouldClose()) runFrame();
+    // runFrame() is the single input pump. Console backends update their
+    // pressed-edge state inside WindowShouldClose(), so polling here as well
+    // consumes every button press before the fixed-step input code sees it.
+    while (running_) runFrame();
 #endif
 }
 
