@@ -197,6 +197,15 @@ void Game::run() {
 void Game::runFrame() {
     constexpr double fixedStep=1.0/45.0;
     if(WindowShouldClose())running_=false;
+#ifdef __EMSCRIPTEN__
+    // GLFW can deliver one delayed portrait resize after InitWindow(). Repair
+    // it before input mapping or drawing so the render target is never scaled
+    // through a portrait framebuffer, even for a single frame.
+    if (GetScreenWidth()!=kViewWidth*2 || GetScreenHeight()!=kViewHeight*2) {
+        ClearWindowState(FLAG_WINDOW_RESIZABLE);
+        SetWindowSize(kViewWidth*2,kViewHeight*2);
+    }
+#endif
     if(!running_) {
 #ifdef __EMSCRIPTEN__
         emscripten_cancel_main_loop();
