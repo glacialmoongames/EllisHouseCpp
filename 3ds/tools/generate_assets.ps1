@@ -14,10 +14,19 @@ New-Item -ItemType Directory -Force $gfx,$src,(Join-Path $rom 'assets'),(Join-Pa
 Copy-Item (Join-Path $ProjectRoot 'assets/game.manifest') (Join-Path $rom 'assets/game.manifest') -Force
 New-Item -ItemType Directory -Force (Join-Path $rom 'assets/sounds') | Out-Null
 Copy-Item (Join-Path $ProjectRoot 'assets/sounds/*') (Join-Path $rom 'assets/sounds') -Force
+$manifestLines=Get-Content (Join-Path $ProjectRoot 'assets/game.manifest')
+$audioOut=Join-Path $rom 'audio';New-Item -ItemType Directory -Force $audioOut | Out-Null
+$ffmpeg=if($env:FFMPEG){$env:FFMPEG}else{(Get-Command ffmpeg -ErrorAction Stop).Source}
+$soundPaths=$manifestLines | ForEach-Object {$f=$_ -split "`t";if($f[0]-eq 'SOUND' -and $f.Count-gt 2){$f[2]}}
+foreach($soundPath in $soundPaths) {
+ $audioName=([IO.Path]::GetFileNameWithoutExtension($soundPath).ToUpperInvariant()+'.PCM')
+ & $ffmpeg -hide_banner -loglevel error -y -i (Join-Path $ProjectRoot ($soundPath-replace '/','\')) -ac 1 -ar 22050 -f s16le (Join-Path $audioOut $audioName)
+ if($LASTEXITCODE){throw "Nintendo 3DS audio conversion failed: $soundPath"}
+}
 $paths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $cropPaths=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $graphicSprites=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-$spriteFrames=@{}; $manifestLines=Get-Content (Join-Path $ProjectRoot 'assets/game.manifest')
+$spriteFrames=@{}
 $manifestLines | ForEach-Object { $f=$_ -split "`t"; if($f[0]-eq 'SPRITE' -and $f.Count-gt 12){$frames=$f[12]-split ';'|?{$_};$spriteFrames[$f[1]]=$frames;$frames|%{[void]$paths.Add($_)}} elseif($f[0]-eq 'FONT' -and $f.Count-gt 2){[void]$paths.Add($f[2]);[void]$cropPaths.Add($f[2])} elseif($f[0]-eq 'GRAPHIC' -and $f.Count-gt 2){[void]$graphicSprites.Add($f[2])} }
 foreach($spriteName in $graphicSprites){foreach($framePath in $spriteFrames[$spriteName]){[void]$cropPaths.Add($framePath)}}
 $assets=@(); $parts=@(); $batch=0; $batchArea=0; $batchImages=@(); $batches=@()
