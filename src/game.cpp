@@ -7,6 +7,9 @@
 #include <fstream>
 #include <stdexcept>
 #include <unordered_set>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
 #if defined(__3DS__) || defined(__PSP__)
 #include <sys/stat.h>
 #endif
@@ -151,38 +154,52 @@ float Game::textWidth(const char* value, float size) const {
 }
 
 void Game::run() {
+    previousFrameTime_=GetTime();
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop_arg([](void* context) {
+        static_cast<Game*>(context)->runFrame();
+    },this,0,true);
+#else
+    while (running_ && !WindowShouldClose()) runFrame();
+#endif
+}
+
+void Game::runFrame() {
     constexpr double fixedStep=1.0/45.0;
-    double previousTime=GetTime();
-    double accumulator=fixedStep;
-    while (running_ && !WindowShouldClose()) {
-        pollInput();
-        if (!screenshotPath_.empty()) {
+    if(WindowShouldClose())running_=false;
+    if(!running_) {
+#ifdef __EMSCRIPTEN__
+        emscripten_cancel_main_loop();
+#endif
+        return;
+    }
+    pollInput();
+    if (!screenshotPath_.empty()) {
+        snapshotForInterpolation();
+        update();
+        clearInputPulse();
+        renderAlpha_=1.0F;
+    } else {
+        const double now=GetTime();
+        frameAccumulator_+=std::min(now-previousFrameTime_,0.1);
+        previousFrameTime_=now;
+        int catchUp=0;
+        while (frameAccumulator_>=fixedStep && catchUp++<5) {
             snapshotForInterpolation();
             update();
             clearInputPulse();
-            renderAlpha_=1.0F;
-        } else {
-            const double now=GetTime();
-            accumulator+=std::min(now-previousTime,0.1);
-            previousTime=now;
-            int catchUp=0;
-            while (accumulator>=fixedStep && catchUp++<5) {
-                snapshotForInterpolation();
-                update();
-                clearInputPulse();
-                accumulator-=fixedStep;
-            }
-            if (catchUp>5) accumulator=0;
-            renderAlpha_=static_cast<float>(std::clamp(accumulator/fixedStep,0.0,1.0));
+            frameAccumulator_-=fixedStep;
         }
-        draw();
-        if (!screenshotPath_.empty() && ++renderedFrames_ == screenshotFrame_) {
-            TraceLog(LOG_INFO, "QA room=%s player=%d dead=%d paused=%d pos=%.1f,%.1f hsp=%.2f sprite=%s",
-                     room_->name.c_str(), hasPlayer_, player_.dead, paused_, player_.x, player_.y,
-                     player_.hsp, player_.sprite.c_str());
-            TakeScreenshot(screenshotPath_.c_str());
-            running_ = false;
-        }
+        if (catchUp>5) frameAccumulator_=0;
+        renderAlpha_=static_cast<float>(std::clamp(frameAccumulator_/fixedStep,0.0,1.0));
+    }
+    draw();
+    if (!screenshotPath_.empty() && ++renderedFrames_ == screenshotFrame_) {
+        TraceLog(LOG_INFO, "QA room=%s player=%d dead=%d paused=%d pos=%.1f,%.1f hsp=%.2f sprite=%s",
+                 room_->name.c_str(), hasPlayer_, player_.dead, paused_, player_.x, player_.y,
+                 player_.hsp, player_.sprite.c_str());
+        TakeScreenshot(screenshotPath_.c_str());
+        running_ = false;
     }
 }
 
@@ -692,6 +709,9 @@ void Game::preloadRoomAssets() {
     drawScratch_.reserve(room_->backgrounds.size()+room_->graphics.size()+room_->instances.capacity()+1);
 #endif
     rebuildDrawList();
+#ifdef __PSP__
+    drawListValid_=false;
+#endif
     sparkleScratch_.reserve(8);
     spawnScratch_.reserve(32);
 }
@@ -785,7 +805,13 @@ void Game::rebuildDrawList() {
 #if defined(__3DS__) || defined(__PSP__)
     const float viewLeft=camera_.target.x-kViewWidth/2.0F;
     const float viewTop=camera_.target.y-kViewHeight/2.0F;
+#ifdef __PSP__
+    constexpr float drawGuard=48.0F;
+    const Rectangle visibleGraphics{viewLeft-drawGuard,viewTop-drawGuard,
+                                    kViewWidth+drawGuard*2,kViewHeight+drawGuard*2};
+#else
     const Rectangle visibleGraphics{viewLeft,viewTop,kViewWidth,kViewHeight};
+#endif
 #endif
     for (std::size_t i=0;i<room_->backgrounds.size();++i)
         drawScratch_.push_back({room_->backgrounds[i].depth,DrawKind::Background,i});
@@ -1825,10 +1851,15 @@ void Game::draw() {
     camera_.target={mix(previousCameraTarget_.x,camera_.target.x,renderAlpha_),
                     mix(previousCameraTarget_.y,camera_.target.y,renderAlpha_)};
 #ifdef __PSP__
-    // Build exactly one submission list for the interpolated camera that will
-    // actually be displayed. Slow frames may execute several fixed updates;
-    // rebuilding there repeated the expensive grid query and depth sort.
-    rebuildDrawList();
+    const int drawCellX=static_cast<int>(std::floor(camera_.target.x/32.0F));
+    const int drawCellY=static_cast<int>(std::floor(camera_.target.y/32.0F));
+    if(!drawListValid_ || drawCellX!=drawListCameraCellX_ || drawCellY!=drawListCameraCellY_ ||
+       stepCounter_-drawListStep_>=4) {
+        rebuildDrawList();
+        drawListStep_=stepCounter_;
+        drawListCameraCellX_=drawCellX;drawListCameraCellY_=drawCellY;
+        drawListValid_=true;
+    }
 #endif
     BeginTextureMode(target_);
     ClearBackground(BLACK);
