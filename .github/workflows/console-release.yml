@@ -75,15 +75,14 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends curl unzip tar
-          mkdir -p /tmp/cia-tools/banner /tmp/cia-tools/makerom /tmp/cia-tools/3dstool
-          curl -fL https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip -o /tmp/cia-tools/banner.zip
+          mkdir -p /tmp/cia-tools/makerom /tmp/cia-tools/3dstool
+          git clone --recurse-submodules https://github.com/diasurgical/bannertool.git /tmp/cia-tools/banner
+          make -C /tmp/cia-tools/banner -j2
           curl -fL https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip -o /tmp/cia-tools/makerom.zip
           curl -fL https://github.com/dnasdw/3dstool/releases/download/v1.2.6/3dstool_linux_x86_64.tar.gz -o /tmp/cia-tools/3dstool.tar.gz
-          unzip -q /tmp/cia-tools/banner.zip -d /tmp/cia-tools/banner
           unzip -q /tmp/cia-tools/makerom.zip -d /tmp/cia-tools/makerom
           tar -xzf /tmp/cia-tools/3dstool.tar.gz -C /tmp/cia-tools/3dstool
-          BANNER_PATH="$(find /tmp/cia-tools/banner -type f -name bannertool | grep -Ei 'linux|ubuntu' | head -n1)"
-          if [ -z "$BANNER_PATH" ]; then BANNER_PATH="$(find /tmp/cia-tools/banner -type f -name bannertool | head -n1)"; fi
+          BANNER_PATH="$(find /tmp/cia-tools/banner -type f -name bannertool | head -n1)"
           MAKEROM_PATH="$(find /tmp/cia-tools/makerom -type f -name makerom | head -n1)"
           THREEDS_PATH="$(find /tmp/cia-tools/3dstool -type f -name 3dstool | head -n1)"
           test -n "$BANNER_PATH" && test -n "$MAKEROM_PATH" && test -n "$THREEDS_PATH"
