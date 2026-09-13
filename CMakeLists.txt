@@ -12,6 +12,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+if(EMSCRIPTEN)
+    set(PLATFORM Web CACHE STRING "" FORCE)
+endif()
 FetchContent_Declare(raylib
     GIT_REPOSITORY https://github.com/raysan5/raylib.git
     GIT_TAG 5.5
@@ -31,6 +34,17 @@ set_target_properties(ellis_house PROPERTIES
 target_include_directories(ellis_house PRIVATE src)
 target_link_libraries(ellis_house PRIVATE raylib)
 
+if(EMSCRIPTEN)
+    set_target_properties(ellis_house PROPERTIES SUFFIX ".html")
+    target_link_options(ellis_house PRIVATE
+        "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/assets@/assets"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sINITIAL_MEMORY=268435456"
+        "-sFORCE_FILESYSTEM=1"
+    )
+endif()
+
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ELLIS_IPO_SUPPORTED OUTPUT ELLIS_IPO_ERROR)
 if(ELLIS_IPO_SUPPORTED)
@@ -44,8 +58,10 @@ else()
     target_link_options(ellis_house PRIVATE -Wl,--gc-sections $<$<CONFIG:Release>:-Wl,-s>)
 endif()
 
-add_custom_command(TARGET ellis_house POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:ellis_house>/assets"
-)
+if(NOT EMSCRIPTEN)
+    add_custom_command(TARGET ellis_house POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+                "$<TARGET_FILE_DIR:ellis_house>/assets"
+    )
+endif()
