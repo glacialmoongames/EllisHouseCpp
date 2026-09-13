@@ -88,6 +88,10 @@ jobs:
           THREEDS_PATH="$(find /tmp/cia-tools/3dstool -type f -name 3dstool | head -n1)"
           test -n "$BANNER_PATH" && test -n "$MAKEROM_PATH" && test -n "$THREEDS_PATH"
           install -m 0755 "$BANNER_PATH" /usr/local/bin/bannertool
+          # The release binary requests the standard Linux x86-64 loader path,
+          # absent from the slim devkitPro image even though glibc is installed.
+          mkdir -p /lib64
+          ln -sf /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
           install -m 0755 "$MAKEROM_PATH" /usr/local/bin/makerom
           install -m 0755 "$THREEDS_PATH" /usr/local/bin/3dstool
           bannertool --help >/dev/null || true
