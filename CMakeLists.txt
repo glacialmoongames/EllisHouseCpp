@@ -42,6 +42,7 @@ if(EMSCRIPTEN)
         "-sALLOW_MEMORY_GROWTH=1"
         "-sINITIAL_MEMORY=268435456"
         "-sSTACK_SIZE=8388608"
+        "-sASYNCIFY=1"
         "-sFORCE_FILESYSTEM=1"
     )
 endif()
