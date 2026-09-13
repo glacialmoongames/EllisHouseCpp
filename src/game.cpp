@@ -40,6 +40,12 @@ Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(kViewWidth * 2, kViewHeight * 2, "Elli's House");
     SetExitKey(KEY_F10);
+#ifdef __EMSCRIPTEN__
+    // raylib's default stream halves hold only 1/30 s of audio. Mobile
+    // browsers regularly miss that deadline while decoding/rendering, which
+    // makes the mixer output gaps perceived as severe distortion.
+    SetAudioStreamBufferSizeDefault(16384);
+#endif
     InitAudioDevice();
     loadFont();
     // Small effects stay resident so the first jump/pickup never performs I/O.
@@ -183,6 +189,11 @@ void Game::runFrame() {
         return;
     }
     pollInput();
+#ifdef __EMSCRIPTEN__
+    // Refill once per browser presentation frame, never several times during
+    // a fixed-step catch-up burst.
+    if (musicLoaded_) UpdateMusicStream(music_);
+#endif
     if (!screenshotPath_.empty()) {
         snapshotForInterpolation();
         update();
@@ -1435,7 +1446,9 @@ void Game::update() {
     setRoomMusic();
     preloadNextRoomMusic();
 #endif
+#ifndef __EMSCRIPTEN__
     if (musicLoaded_) UpdateMusicStream(music_);
+#endif
     if (!paused_) {
         for(const std::size_t index:animationIndices_) {
             if(index>=room_->instances.size())continue;
