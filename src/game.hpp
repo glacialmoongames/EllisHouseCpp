@@ -98,6 +98,10 @@ private:
     std::vector<InstanceDef> spawnScratch_;
     InputPulse input_{};
     float renderAlpha_{1.0F};
+    std::uint64_t drawListStep_{};
+    int drawListCameraCellX_{}, drawListCameraCellY_{};
+    bool drawListValid_{};
+    double previousFrameTime_{}, frameAccumulator_{1.0/45.0};
 
     void loadRoom(std::size_t index, bool restart = false);
     void preloadRoomAssets();
@@ -105,6 +109,7 @@ private:
     void rebuildCollisionIndex();
     void rebuildDrawList();
     void update();
+    void runFrame();
     void pollInput();
     void snapshotForInterpolation();
     void clearInputPulse();
