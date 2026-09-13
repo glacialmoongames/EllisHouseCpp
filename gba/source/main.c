@@ -170,7 +170,17 @@ static uint16_t isqrt32(uint32_t value) {
     return (uint16_t)root;
 }
 static int enemy_near(const RuntimeEnemy* e,int x,int y) {
-    int dx=(e->a.x>>8)-x,dy=(e->a.y>>8)-y;
+    /* Match GameMaker distance_to_object: shortest distance between the
+       collision rectangles, not the distance between instance origins. */
+    const EnemySpriteAsset* s=&enemy_sprite_assets[e->a.sprite];
+    int ax=iabs(e->a.scale_x),ay=iabs(e->a.scale_y);
+    int left=(e->a.x>>8)-((e->a.scale_x<0?s->w-s->ox:s->ox)*ax>>8);
+    int top=(e->a.y>>8)-((e->a.scale_y<0?s->h-s->oy:s->oy)*ay>>8);
+    int right=left+((s->w*ax)>>8),bottom=top+((s->h*ay)>>8);
+    int player_left=x-7,player_right=x+7;
+    int player_top=g.low_profile?y-3:y-12,player_bottom=y+12;
+    int dx=left>player_right?left-player_right:player_left>right?player_left-right:0;
+    int dy=top>player_bottom?top-player_bottom:player_top>bottom?player_top-bottom:0;
     return (uint32_t)(dx*dx+dy*dy)<(uint32_t)e->a.range*e->a.range;
 }
 static void enemy_aim(RuntimeEnemy* e,int x,int y) {
@@ -271,7 +281,9 @@ static IWRAM_CODE void update_enemies(void) {
                 else if(e->a.timer>50){e->a.state=1;e->a.timer=0;}
             } else if(e->a.state==1) {
                 if(e->a.scale_x>0&&e->a.scale_x<256){e->a.scale_x+=26;e->a.scale_y+=26;}
-                if(e->a.flags&&enemy_hits_solid_at(e,e->aim_x,e->aim_y)){e->aim_x=-e->aim_x;e->aim_y=-e->aim_y;}
+                /* Only bit 0 marks a bouncing projectile. Bits 1/2 identify
+                   painting render variants and must never reverse movement. */
+                if((e->a.flags&1)&&enemy_hits_solid_at(e,e->aim_x,e->aim_y)){e->aim_x=-e->aim_x;e->aim_y=-e->aim_y;}
                 else {e->a.x+=e->aim_x;e->a.y+=e->aim_y;}
             }
             break;
