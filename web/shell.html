@@ -2,23 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <title>Elli's House</title>
   <style>
-    html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
-    body{display:grid;place-items:center}
-    canvas{width:min(100vw,calc(100vh * 1.76147));height:min(100vh,calc(100vw / 1.76147));image-rendering:pixelated;outline:0}
-    #status{position:fixed;inset:auto 0 18px;text-align:center;color:#eee;font:14px Arial,sans-serif}
+    :root{color-scheme:dark}
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden;overscroll-behavior:none}
+    body{display:flex;flex-direction:column;align-items:center;justify-content:center}
+    #stage{width:100%;min-height:0;flex:1;display:grid;place-items:center;overflow:hidden}
+    canvas{display:block;background:#000;image-rendering:pixelated;image-rendering:crisp-edges;outline:0}
+    canvas:fullscreen{
+      position:fixed!important;left:50%!important;top:50%!important;
+      transform:translate(-50%,-50%)!important;margin:0!important;
+      max-width:none!important;max-height:none!important;background:#000
+    }
+    #status{position:fixed;left:0;right:0;bottom:18px;text-align:center;color:#eee;font:14px Arial,sans-serif;pointer-events:none}
+    #touch-controls{display:none;width:min(100%,620px);height:154px;padding:8px 12px max(10px,env(safe-area-inset-bottom));gap:18px;grid-template-columns:1fr 1fr;flex:0 0 auto;touch-action:none;user-select:none;-webkit-user-select:none}
+    .pad,.actions{display:grid;gap:7px;align-items:center;justify-items:center}
+    .pad{grid-template:repeat(2,56px)/repeat(3,56px)}
+    .actions{grid-template:56px 56px/repeat(3,64px)}
+    .control{width:56px;height:56px;border:2px solid #8b6a80;border-radius:13px;background:#382b36;color:#fff;font:700 20px Arial,sans-serif;box-shadow:inset 0 0 0 2px #181218;touch-action:none}
+    .control:active,.control.held{background:#6c4b64;transform:translateY(1px)}
+    .up{grid-column:2}.left{grid-column:1}.down{grid-column:2}.right{grid-column:3}
+    .pause{grid-column:2;font-size:12px}.dash{grid-column:2}.jump{grid-column:3}
+    .actions .control{width:64px}
+    @media (hover:none) and (pointer:coarse){
+      body{justify-content:flex-start}
+      #touch-controls{display:grid}
+      #status{bottom:166px}
+    }
   </style>
 </head>
 <body>
-  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+  <div id="touch-controls" aria-label="Touch controls">
+    <div class="pad">
+      <button class="control up" data-code="ArrowUp" data-key="ArrowUp" aria-label="Up">▲</button>
+      <button class="control left" data-code="ArrowLeft" data-key="ArrowLeft" aria-label="Left">◀</button>
+      <button class="control down" data-code="ArrowDown" data-key="ArrowDown" aria-label="Down">▼</button>
+      <button class="control right" data-code="ArrowRight" data-key="ArrowRight" aria-label="Right">▶</button>
+    </div>
+    <div class="actions">
+      <button class="control pause" data-code="Escape" data-key="Escape" aria-label="Pause">PAUSE</button>
+      <button class="control dash" data-code="KeyW" data-key="w" aria-label="Dash">DASH</button>
+      <button class="control jump" data-code="Space" data-key=" " aria-label="Jump">JUMP</button>
+    </div>
+  </div>
   <div id="status">Loading Elli's House…</div>
   <script>
-    var Module={canvas:document.getElementById('canvas'),setStatus:function(value){
+    const canvas=document.getElementById('canvas');
+    const stage=document.getElementById('stage');
+    const controls=document.getElementById('touch-controls');
+    const baseWidth=384,baseHeight=218;
+    let gameStarted=false;
+
+    function fitCanvas(){
+      const fullscreen=document.fullscreenElement===canvas;
+      const availableWidth=fullscreen?innerWidth:stage.clientWidth;
+      const availableHeight=fullscreen?innerHeight:stage.clientHeight;
+      const ratio=Math.max(1,window.devicePixelRatio||1);
+      const fit=Math.min(availableWidth*ratio/baseWidth,availableHeight*ratio/baseHeight);
+      const physicalScale=fit>=1?Math.floor(fit):fit;
+      canvas.style.width=(baseWidth*physicalScale/ratio)+'px';
+      canvas.style.height=(baseHeight*physicalScale/ratio)+'px';
+    }
+    new ResizeObserver(fitCanvas).observe(stage);
+    addEventListener('resize',fitCanvas,{passive:true});
+    addEventListener('fullscreenchange',()=>requestAnimationFrame(fitCanvas));
+    fitCanvas();
+
+    function blockGameKeys(event){
+      if(gameStarted&&['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))event.preventDefault();
+    }
+    addEventListener('keydown',blockGameKeys,{passive:false});
+    canvas.addEventListener('focus',()=>{gameStarted=true});
+
+    const held=new Map();
+    function sendKey(button,down){
+      const code=button.dataset.code,key=button.dataset.key;
+      if(held.get(code)===down)return;
+      held.set(code,down);
+      button.classList.toggle('held',down);
+      const event=new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true});
+      window.dispatchEvent(event);
+      document.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true}));
+      canvas.focus({preventScroll:true});
+      gameStarted=true;
+    }
+    document.querySelectorAll('.control').forEach(button=>{
+      button.addEventListener('pointerdown',event=>{event.preventDefault();button.setPointerCapture(event.pointerId);sendKey(button,true)});
+      for(const type of ['pointerup','pointercancel','lostpointercapture'])
+        button.addEventListener(type,event=>{event.preventDefault();sendKey(button,false)});
+    });
+    function releaseControls(){document.querySelectorAll('.control.held').forEach(button=>sendKey(button,false))}
+    addEventListener('blur',releaseControls);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseControls()});
+
+    var Module={canvas,setStatus:function(value){
       var status=document.getElementById('status');status.textContent=value||'';status.hidden=!value;
+      if(!value){gameStarted=true;canvas.focus({preventScroll:true});fitCanvas()}
     }};
-    addEventListener('click',function(){Module.canvas.focus()},{once:true});
+    addEventListener('pointerdown',function(){canvas.focus({preventScroll:true})},{once:true});
   </script>
   {{{ SCRIPT }}}
 </body>
