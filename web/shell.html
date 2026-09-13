@@ -83,9 +83,15 @@
       if(held.get(code)===down)return;
       held.set(code,down);
       button.classList.toggle('held',down);
-      const event=new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true});
-      window.dispatchEvent(event);
-      document.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true}));
+      const keyCodes={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,Space:32,KeyW:87,Escape:27};
+      const createEvent=()=>{
+        const event=new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true});
+        Object.defineProperties(event,{keyCode:{value:keyCodes[code]},which:{value:keyCodes[code]}});
+        return event;
+      };
+      window.dispatchEvent(createEvent());
+      document.dispatchEvent(createEvent());
+      canvas.dispatchEvent(createEvent());
       canvas.focus({preventScroll:true});
       gameStarted=true;
     }
