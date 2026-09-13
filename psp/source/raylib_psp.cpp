@@ -5,6 +5,7 @@
 #include <pspdisplay.h>
 #include <pspctrl.h>
 #include <pspaudio.h>
+#include <psppower.h>
 #include <zlib.h>
 #include <malloc.h>
 #include <algorithm>
@@ -40,6 +41,7 @@ std::string dataRoot;
 struct CachedPart { void* pixels{}; unsigned long long used{}; };
 std::vector<CachedPart> cache(std::size(pspParts));
 std::size_t cacheBytes=0;
+std::vector<unsigned char> compressedScratch;
 enum class Kind {Texture,Rect,Circle,Subtract,Normal};
 struct Command {Kind kind;Texture2D tex{};Rectangle src{},dst{};Vector2 origin{};float angle{};Color color{},edge{};Camera2D cam{};bool world{};};
 std::vector<Command> commands;
@@ -90,12 +92,12 @@ void* partPixels(std::size_t index){
         std::free(cache[oldest].pixels);cache[oldest].pixels=nullptr;
         cacheBytes-=pspParts[oldest].tw*pspParts[oldest].th*4;
     }
-    std::vector<unsigned char> compressed(part.size);
+    compressedScratch.resize(part.size);
     std::fseek(textureFile,part.offset,SEEK_SET);
-    if(std::fread(compressed.data(),1,part.size,textureFile)!=part.size)throw std::runtime_error("Texture pack read failed");
+    if(std::fread(compressedScratch.data(),1,part.size,textureFile)!=part.size)throw std::runtime_error("Texture pack read failed");
     c.pixels=memalign(16,bytes);if(!c.pixels)throw std::runtime_error("Texture memory exhausted");
     uLongf size=bytes;
-    if(uncompress(static_cast<Bytef*>(c.pixels),&size,compressed.data(),part.size)!=Z_OK||size!=bytes)
+    if(uncompress(static_cast<Bytef*>(c.pixels),&size,compressedScratch.data(),part.size)!=Z_OK||size!=bytes)
         throw std::runtime_error("Texture decompression failed");
     sceKernelDcacheWritebackRange(c.pixels,bytes);cacheBytes+=bytes;return c.pixels;
 }
@@ -166,11 +168,13 @@ void rectNow(Rectangle r,Color c){
 void circleNow(Rectangle r,Color center,Color edge){
     auto p=position(r.x,r.y);const float radius=r.width*(world?camera.zoom:1)*outputScale;
     if(p.x+radius<=clipLeft||p.y+radius<=clipTop||p.x-radius>=clipRight||p.y-radius>=clipBottom)return;
-    static const auto unit=[](){std::vector<Vector2> v;for(int i=0;i<=64;++i)v.push_back({std::cos(i*2*PI/64),std::sin(i*2*PI/64)});return v;}();
-    sceGuDisable(GU_TEXTURE_2D);auto* v=static_cast<Vertex*>(sceGuGetMemory(66*sizeof(Vertex)));
+    // At the native 218-pixel viewport, 32 sides are visually circular while
+    // halving the geometry and command-list pressure of every light.
+    static const auto unit=[](){std::vector<Vector2> v;v.reserve(33);for(int i=0;i<=32;++i)v.push_back({std::cos(i*2*PI/32),std::sin(i*2*PI/32)});return v;}();
+    sceGuDisable(GU_TEXTURE_2D);auto* v=static_cast<Vertex*>(sceGuGetMemory(34*sizeof(Vertex)));
     v[0]={0,0,rgba(center),p.x,p.y,0};
-    for(int i=0;i<=64;++i)v[i+1]={0,0,rgba(edge),p.x+unit[i].x*radius,p.y+unit[i].y*radius,0};
-    sceGuDrawArray(GU_TRIANGLE_FAN,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,66,nullptr,v);
+    for(int i=0;i<=32;++i)v[i+1]={0,0,rgba(edge),p.x+unit[i].x*radius,p.y+unit[i].y*radius,0};
+    sceGuDrawArray(GU_TRIANGLE_FAN,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,34,nullptr,v);
 }
 void replay(){
     // Pixel-perfect keeps every source pixel 1:1. Full screen uses one uniform
@@ -182,6 +186,9 @@ void replay(){
     const int top=std::max(0,int(std::floor(offsetY)));
     const int right=std::min(480,int(std::ceil(offsetX+384.0f*outputScale)));
     const int bottom=std::min(272,int(std::ceil(offsetY+218.0f*outputScale)));
+    // Clear physical VRAM before narrowing the scissor. The unused area is a
+    // true black border and stale room pixels cannot escape pixel-perfect mode.
+    sceGuScissor(0,0,480,272);sceGuClearColor(0xff000000);sceGuClear(GU_COLOR_BUFFER_BIT);
     clipLeft=static_cast<float>(left);clipTop=static_cast<float>(top);
     clipRight=static_cast<float>(right);clipBottom=static_cast<float>(bottom);
     sceGuScissor(left,top,right,bottom);
@@ -241,6 +248,7 @@ int utf8(const char*& s){unsigned c=(unsigned char)*s++;if(c<128)return c;int n=
 void SetConfigFlags(unsigned){}void ClearWindowState(unsigned){}
 void InitWindow(int,int,const char*){
     if(initialized)return;
+    scePowerSetClockFrequency(333,333,166);
     sceCtrlSetSamplingCycle(0);sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     int cb=sceKernelCreateThread("ElliCallbacks",callbackThread,0x11,4096,0,nullptr);if(cb>=0)sceKernelStartThread(cb,0,nullptr);
     sceGuInit();startList();sceGuDrawBuffer(GU_PSM_8888,nullptr,512);
@@ -248,7 +256,7 @@ void InitWindow(int,int,const char*){
     sceGuOffset(2048-240,2048-136);sceGuViewport(2048,2048,480,272);
     sceGuDisable(GU_DEPTH_TEST);sceGuDisable(GU_CULL_FACE);sceGuDisable(GU_LIGHTING);
     sceGuShadeModel(GU_SMOOTH);sceGuScissor(0,0,480,272);sceGuEnable(GU_SCISSOR_TEST);normalBlend();
-    syncList();sceDisplayWaitVblankStart();sceGuDisplay(GU_TRUE);commands.reserve(2048);initialized=true;
+    syncList();sceDisplayWaitVblankStart();sceGuDisplay(GU_TRUE);commands.reserve(4096);compressedScratch.reserve(256*1024);initialized=true;
 }
 void CloseWindow(){if(!initialized)return;syncList();sceGuTerm();for(auto& c:cache)std::free(c.pixels);if(textureFile)std::fclose(textureFile);if(maskFile)std::fclose(maskFile);initialized=false;}
 bool WindowShouldClose(){unsigned previous=held;sceCtrlPeekBufferPositive(&pad,1);held=pad.Buttons;if(pad.Lx<96)held|=PSP_CTRL_LEFT;if(pad.Lx>160)held|=PSP_CTRL_RIGHT;if(pad.Ly<96)held|=PSP_CTRL_UP;if(pad.Ly>160)held|=PSP_CTRL_DOWN;pressed=held&~previous;return quitting;}
