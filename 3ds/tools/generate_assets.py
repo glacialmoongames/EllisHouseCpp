@@ -17,6 +17,11 @@ for directory in (gfx, src, rom / "assets", rom / "masks", rom / "audio"):
 
 manifest = (root / "assets" / "game.manifest").read_text(encoding="utf-8").splitlines()
 shutil.copyfile(root / "assets" / "game.manifest", rom / "assets" / "game.manifest")
+# bannertool needs a WAV for the HOME Menu banner even though runtime audio uses PCM.
+banner_sound = root / "assets" / "sounds" / "sfx_coin.wav"
+banner_sound_out = rom / "assets" / "sounds" / "sfx_coin.wav"
+banner_sound_out.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(banner_sound, banner_sound_out)
 
 paths = set()
 sprite_frames = {}
