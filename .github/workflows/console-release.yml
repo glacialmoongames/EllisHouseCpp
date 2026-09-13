@@ -1,0 +1,112 @@
+name: Build and publish console ports
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/console-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: v0.1.0-port-preview
+
+jobs:
+  psp:
+    name: Build PSP package
+    runs-on: ubuntu-latest
+    container: pspdev/pspdev:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install asset preparation dependencies
+        run: |
+          python3 -m pip install --break-system-packages --no-cache-dir pillow numpy soundfile
+      - name: Prepare original assets and build optimized EBOOT
+        run: |
+          python3 psp/tools/prepare_assets.py
+          make -C psp -j2
+          python3 psp/tools/package.py
+      - name: Package PSP/GAME layout
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root = Path.cwd()
+          source = root / "EllisHousePSP"
+          output = root / "EllisHouse-PSP.zip"
+          with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in source.rglob("*"):
+                  if path.is_file():
+                      archive.write(path, Path("PSP/GAME/EllisHousePSP") / path.relative_to(source))
+          print(output, output.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psp-release
+          path: EllisHouse-PSP.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  n3ds:
+    name: Build Nintendo 3DS packages
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install asset preparation dependencies
+        run: |
+          python3 -m pip install --break-system-packages --no-cache-dir pillow numpy soundfile
+      - name: Generate optimized ROMFS
+        run: python3 3ds/tools/generate_assets.py .
+      - name: Build 3DSX and CIA
+        run: |
+          make -C 3ds -j2
+          make -C 3ds cia -j2
+      - name: Package Homebrew Launcher layout
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil, zipfile
+          root = Path.cwd()
+          stage = root / "_3dsx" / "3ds" / "EllisHouse3DS"
+          stage.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(root / "EllisHouse3DS.3dsx", stage / "EllisHouse3DS.3dsx")
+          with zipfile.ZipFile(root / "EllisHouse-3DSX.zip", "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+              for path in (root / "_3dsx").rglob("*"):
+                  if path.is_file():
+                      archive.write(path, path.relative_to(root / "_3dsx"))
+          shutil.copy2(root / "EllisHouse.cia", root / "EllisHouse-3DS.cia")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3ds-release
+          path: |
+            EllisHouse-3DSX.zip
+            EllisHouse-3DS.cia
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Replace GitHub release downloads
+    needs: [psp, n3ds]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          path: new
+          merge-multiple: true
+      - name: Upload updated PSP and 3DS builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" new/EllisHouse-PSP.zip new/EllisHouse-3DSX.zip new/EllisHouse-3DS.cia --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Publish checksums for the updated console packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd new
+          sha256sum EllisHouse-PSP.zip EllisHouse-3DSX.zip EllisHouse-3DS.cia > SHA256-CONSOLES.txt
+          gh release upload "$RELEASE_TAG" SHA256-CONSOLES.txt --clobber --repo "$GITHUB_REPOSITORY"
