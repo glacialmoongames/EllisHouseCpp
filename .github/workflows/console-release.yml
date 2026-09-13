@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/console-release.yml'
+      - 'src/**'
+      - 'assets/**'
+      - '3ds/**'
+      - 'psp/**'
   workflow_dispatch:
 
 permissions:
