@@ -78,12 +78,13 @@ jobs:
           mkdir -p /tmp/cia-tools/makerom /tmp/cia-tools/3dstool
           git clone --recurse-submodules https://github.com/diasurgical/bannertool.git /tmp/cia-tools/banner
           make -C /tmp/cia-tools/banner -j2
-          curl -fL https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip -o /tmp/cia-tools/makerom.zip
+          git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git /tmp/cia-tools/project-ctr
+          make -C /tmp/cia-tools/project-ctr/makerom deps -j2
+          make -C /tmp/cia-tools/project-ctr/makerom -j2
           curl -fL https://github.com/dnasdw/3dstool/releases/download/v1.2.6/3dstool_linux_x86_64.tar.gz -o /tmp/cia-tools/3dstool.tar.gz
-          unzip -q /tmp/cia-tools/makerom.zip -d /tmp/cia-tools/makerom
           tar -xzf /tmp/cia-tools/3dstool.tar.gz -C /tmp/cia-tools/3dstool
           BANNER_PATH="$(find /tmp/cia-tools/banner -type f -name bannertool | head -n1)"
-          MAKEROM_PATH="$(find /tmp/cia-tools/makerom -type f -name makerom | head -n1)"
+          MAKEROM_PATH="$(find /tmp/cia-tools/project-ctr/makerom -type f -name makerom | head -n1)"
           THREEDS_PATH="$(find /tmp/cia-tools/3dstool -type f -name 3dstool | head -n1)"
           test -n "$BANNER_PATH" && test -n "$MAKEROM_PATH" && test -n "$THREEDS_PATH"
           install -m 0755 "$BANNER_PATH" /usr/local/bin/bannertool
