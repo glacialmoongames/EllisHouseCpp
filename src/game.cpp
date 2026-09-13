@@ -47,6 +47,13 @@ Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
 #endif
     InitWindow(kViewWidth * 2, kViewHeight * 2, "Elli's House");
+#ifdef __EMSCRIPTEN__
+    // Some mobile browsers still initialize GLFW from the portrait viewport.
+    // Programmatically restore both raylib's screen/FBO state and the HTML
+    // canvas backing store after GLFW has installed its browser callbacks.
+    ClearWindowState(FLAG_WINDOW_RESIZABLE);
+    SetWindowSize(kViewWidth * 2, kViewHeight * 2);
+#endif
     SetExitKey(KEY_F10);
 #ifdef __EMSCRIPTEN__
     // raylib's default stream halves hold only 1/30 s of audio. Mobile
