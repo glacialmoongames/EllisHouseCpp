@@ -14,8 +14,16 @@ int main(int argc, char** argv) {
             root = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::current_path();
         }
         auto data = loadManifest(root / "assets" / "game.manifest");
+#ifdef __EMSCRIPTEN__
+        // The browser main loop outlives the C++ entry stack. Keep the complete
+        // game state in persistent heap storage instead of handing Emscripten a
+        // pointer to a stack object that becomes invalid after main unwinds.
+        auto* game = new Game(std::move(data), std::move(root));
+        game->run();
+#else
         Game game(std::move(data), std::move(root));
         game.run();
+#endif
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Elli's House: " << error.what() << '\n';
