@@ -125,9 +125,8 @@ Copy-Item -LiteralPath $retroflow -Destination (Join-Path $root 'artwork\psp\gen
 $standard = Join-Path $root 'artwork\gba\standard\IMGS\E\L\ELLI.bmp'
 $dsWide = Join-Path $root 'artwork\gba\ds-style\SYSTEM\IMGS\E\L\ELLI.bmp'
 $dsSquare = Join-Path $root 'artwork\gba\ds-style\SYSTEM\IMGS2\E\L\ELLI.bmp'
-Save-GbaBmp -Source $gbaCover -Destination $standard -Width 120 -Height 80
-New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dsWide) | Out-Null
-Copy-Item -LiteralPath $standard -Destination $dsWide -Force
+Save-CroppedImage -Source $gbaCover -Destination $standard -Width 120 -Height 80 -Format Bmp
+Save-GbaBmp -Source $gbaCover -Destination $dsWide -Width 120 -Height 80
 Save-GbaBmp -Source $gbaCover -Destination $dsSquare -Width 80 -Height 80
 
 Write-Output 'Converted the supplied cover files for RetroFlow, EZ-Flash and DS Style.'
