@@ -1,8 +1,11 @@
 TARGET = EllisHousePSP
 OBJS = source/main.o source/raylib_psp.o source/game.o source/manifest.o
 INCDIR = include ../src
-CFLAGS = -O3 -G0 -Wall -ffunction-sections -fdata-sections -D__PSP__
-CXXFLAGS = -std=gnu++20 -fexceptions -frtti
+CFLAGS = -O3 -G0 -Wall -ffunction-sections -fdata-sections -fomit-frame-pointer -ffast-math -fno-math-errno -D__PSP__
+# The shared game sources are built by explicit rules below. They must carry
+# the optimisation flags as well; otherwise the PSP spends most of its frame
+# in unoptimised C++ despite the CFLAGS setting above.
+CXXFLAGS = $(CFLAGS) -std=gnu++20 -fexceptions -frtti -fno-threadsafe-statics
 LDFLAGS = -Wl,-Ttools/linkfile.legacy
 LIBS = -lstdc++ -lz -lpspgu -lpspaudio -lpsppower -lm
 BUILD_PRX = 0
