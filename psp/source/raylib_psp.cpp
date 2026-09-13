@@ -186,9 +186,9 @@ void replay(){
     const int top=std::max(0,int(std::floor(offsetY)));
     const int right=std::min(480,int(std::ceil(offsetX+384.0f*outputScale)));
     const int bottom=std::min(272,int(std::ceil(offsetY+218.0f*outputScale)));
-    // Clear physical VRAM before narrowing the scissor. The unused area is a
-    // true black border and stale room pixels cannot escape pixel-perfect mode.
-    sceGuScissor(0,0,480,272);sceGuClearColor(0xff000000);sceGuClear(GU_COLOR_BUFFER_BIT);
+    // BeginDrawing/ClearBackground already clears the complete physical
+    // framebuffer once. Narrowing the scissor here preserves the black border
+    // and prevents all world drawing outside the viewport at zero extra fill.
     clipLeft=static_cast<float>(left);clipTop=static_cast<float>(top);
     clipRight=static_cast<float>(right);clipBottom=static_cast<float>(bottom);
     sceGuScissor(left,top,right,bottom);
