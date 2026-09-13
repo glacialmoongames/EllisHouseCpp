@@ -164,7 +164,7 @@ void Game::run() {
 #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop_arg([](void* context) {
         static_cast<Game*>(context)->runFrame();
-    },this,0,true);
+    },this,0,false);
 #else
     while (running_ && !WindowShouldClose()) runFrame();
 #endif
