@@ -48,8 +48,14 @@ Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), 
         Sound loaded=LoadSound((root_/definition.path).string().c_str());
         if (IsSoundValid(loaded)) sounds_.emplace(name,loaded);
     }
-    // VSync drives presentation; gameplay remains a deterministic 45 Hz fixed step.
+    // The browser owns presentation timing through requestAnimationFrame. A raylib
+    // frame limiter would call emscripten_sleep(), which requires Asyncify and can
+    // abort before the first frame. Gameplay remains a deterministic 45 Hz step.
+#ifdef __EMSCRIPTEN__
+    SetTargetFPS(0);
+#else
     SetTargetFPS(120);
+#endif
     target_ = LoadRenderTexture(kViewWidth, kViewHeight);
     lightTarget_ = LoadRenderTexture(kViewWidth, kViewHeight);
     SetTextureFilter(target_.texture, TEXTURE_FILTER_POINT);
