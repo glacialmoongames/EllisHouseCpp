@@ -30,6 +30,8 @@ assert b'EllisHouse\0' in data_psp, 'expected PSP module name is missing'
 
 shutil.copyfile(pbp, install / 'EBOOT.PBP')
 shutil.copytree(port / 'package/ASSETS', install / 'ASSETS', dirs_exist_ok=True)
+for stale in (install / 'ASSETS').glob('SND_*.PCM'):
+    stale.unlink()
 
 print(f'PBP: {install / "EBOOT.PBP"} ({len(data)} bytes)')
 print('SHA256:', hashlib.file_digest((install / 'EBOOT.PBP').open('rb'), 'sha256').hexdigest())

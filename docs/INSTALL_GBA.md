@@ -21,7 +21,7 @@ header code, not the ROM filename.
 
 ## DS Style kernel
 
-DS Style supports wide artwork (120×80) and square artwork (80×80). These files use the kernel's native uncompressed 16-bit top-down BGR555 BMP layout:
+DS Style supports wide artwork (120×80) and square artwork (80×80):
 
 1. Copy `gba/ds-style/SYSTEM/IMGS/E/L/ELLI.bmp` to the same path on the card for
    wide/title artwork.

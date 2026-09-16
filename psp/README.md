@@ -1,8 +1,9 @@
 # Elli's House — PSP
 
-Native PSP port of the shared PC game code. The PSP uses a 384×218 viewport
-centered at (48,27) on its 480×272 display, at 1:1 pixel scale. Menus, HUD,
-credits, signs, endings, boss, music and New Game Plus use the PC implementation.
+Native PSP port of the shared PC game code. The PSP scales its 384×218 viewport
+proportionally to fill the 480×272 display. Menus, HUD,
+credits, signs, endings, boss and New Game Plus use the PC implementation. This
+performance-focused package omits background music while retaining every sound effect.
 
 ## Controls
 
@@ -11,8 +12,6 @@ credits, signs, endings, boss, music and New Game Plus use the PC implementation
 - Circle / triangle / L / R: dash while moving in the air.
 - Start: pause.
 - Cross / circle: confirm menu selection.
-- The pause menu display option alternates between pixel-perfect 384×218 and
-  proportional full screen (approximately 479×272).
 
 ## Output
 
@@ -44,16 +43,19 @@ Only the `PSP/GAME` package is built. ISO generation is intentionally disabled.
 
 The native GU renderer retains full RGBA8888 colors and alpha, nearest-neighbor
 sampling, original pivots, flipped sprites, draw order and PC lighting blend.
-Pixel-perfect mode clips the complete camera viewport and clears the remaining
-48-pixel side and 27-pixel top/bottom borders to opaque black every frame.
+The only display mode is proportional full screen (approximately 479×272),
+with no pixel-perfect branch or border rendering cost.
 All 783 texture frames and their masks are packed losslessly into 256px chunks;
-only needed chunks are decompressed into an 8 MiB RAM cache. Texture eviction
-waits until earlier GPU work has completed. Static graphics use the spatial
-index shared with 3DS. No enemy activation or simulation is culled by camera.
+only needed chunks are decompressed into a 10 MiB RAM cache. Texture eviction
+waits until earlier GPU work has completed. Room assets are warmed during the
+transition so decompression does not interrupt play. Visible static tiles use
+precomputed geometry, spatial culling and bounded GPU batches. Collision,
+interaction and hazard queries use dedicated indexes. No enemy activation or
+simulation is culled by camera.
 
-Music streams as 44.1 kHz stereo PCM in a separate audio thread; sound effects
-remain resident. Conversion happens during asset generation, avoiding runtime
-MP3/Vorbis decoding and full-song allocations. The main CPU is set to 333 MHz.
+Sound effects are resident 44.1 kHz stereo PCM and mix in a separate audio
+thread. The package contains no music streams, eliminating continuous storage
+I/O and music-mixing work. The main CPU is set to 333 MHz.
 The build does not request the additional RAM of PSP-2000/3000.
 
 ## Build on this workstation

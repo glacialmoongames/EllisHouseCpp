@@ -15,9 +15,6 @@ int main(int argc, char** argv) {
         }
         auto data = loadManifest(root / "assets" / "game.manifest");
 #ifdef __EMSCRIPTEN__
-        // The browser main loop outlives the C++ entry stack. Keep the complete
-        // game state in persistent heap storage instead of handing Emscripten a
-        // pointer to a stack object that becomes invalid after main unwinds.
         auto* game = new Game(std::move(data), std::move(root));
         game->run();
 #else

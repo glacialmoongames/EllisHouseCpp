@@ -170,8 +170,6 @@ static uint16_t isqrt32(uint32_t value) {
     return (uint16_t)root;
 }
 static int enemy_near(const RuntimeEnemy* e,int x,int y) {
-    /* Match GameMaker distance_to_object: shortest distance between the
-       collision rectangles, not the distance between instance origins. */
     const EnemySpriteAsset* s=&enemy_sprite_assets[e->a.sprite];
     int ax=iabs(e->a.scale_x),ay=iabs(e->a.scale_y);
     int left=(e->a.x>>8)-((e->a.scale_x<0?s->w-s->ox:s->ox)*ax>>8);

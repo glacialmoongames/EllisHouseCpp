@@ -1,7 +1,7 @@
 # Elli's House — ports
 
-Ports of **Elli's House** for Windows (C++), browsers, Game Boy Advance,
-Nintendo 3DS and PSP. The original game was created in GameMaker by the **Glacial Moon Games
+Ports of **Elli's House** for Windows (C++), Game Boy Advance, Nintendo 3DS and
+PSP. The original game was created in GameMaker by the **Glacial Moon Games
 team** for **GameJaaj 7**. Development of these ports was assisted by AI.
 
 The original Windows/GameMaker release is available on
@@ -16,7 +16,6 @@ Ready-to-play packages are published in GitHub Releases:
 | Platform | Release file | Contents |
 |---|---|---|
 | Windows | `EllisHouse-Windows.zip` | `ellis_house.exe` and `assets` |
-| Browser | [Play online](https://glacialmoongames.github.io/ellishouse/) | WebAssembly build hosted on the studio website |
 | Game Boy Advance | `EllisHouse-GBA.gba` | GBA ROM, internal code `ELLI` |
 | Nintendo 3DS | `EllisHouse-3DSX.zip` | Homebrew Launcher package |
 | Nintendo 3DS | `EllisHouse-3DS.cia` | CIA package |
@@ -71,15 +70,6 @@ cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build -j
 ```
 
-### Browser
-
-Requires Emscripten 3.1.64 or newer.
-
-```sh
-emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
-cmake --build build-web --parallel
-```
-
 ### GBA
 
 Requires devkitARM and Python 3.
@@ -92,7 +82,7 @@ make -j4
 
 ### Nintendo 3DS
 
-Requires devkitPro/devkitARM, `3ds-dev`, Citro2D, Citro3D and FFmpeg. Run
+Requires devkitPro/devkitARM, `3ds-dev`, Citro2D and Citro3D. Run
 `3ds/tools/generate_assets.ps1`, then `make -C 3ds -j4`. CIA creation also
 requires `bannertool`, `makerom` and `3dstool`; their paths can be passed as
 Make variables.

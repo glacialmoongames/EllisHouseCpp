@@ -62,4 +62,3 @@ $lines = foreach ($file in $files) {
 }
 [IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
 Write-Output "Release files created in $dist"
-

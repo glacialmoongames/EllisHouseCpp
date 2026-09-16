@@ -430,7 +430,9 @@ void PreloadMusicStream(const char* path){
     // Decode on the Old 3DS system core allocation so MP3/Vorbis work cannot
     // steal the render budget. If the firmware refuses that worker, decode once
     // synchronously instead of retrying forever and leaving music silent.
-    // Prepared PCM avoids codec recursion and the hardware crash caused by decoder stack pressure.
+    // Prepared PCM needs no codec recursion or large decoder stack. Keeping the
+    // worker small also avoids the stack corruption seen as a PC in .rodata on
+    // physical hardware while preserving asynchronous room loading.
     musicPreloadThread=threadCreate(musicPreloadWorker,argument,64*1024,0x30,musicWorkerCore,false);
     if(!musicPreloadThread) {
         delete argument;

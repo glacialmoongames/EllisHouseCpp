@@ -24,8 +24,7 @@ alignas(16) unsigned int displayList[262144];
 constexpr unsigned frameBytes=512*272*4;
 constexpr unsigned lightOffset=frameBytes*2;
 volatile bool quitting=false;
-bool initialized=false,listOpen=false,screen=false,world=false;
-bool fullScreenView=false;
+bool initialized=false,listOpen=false,gpuPending=false,screen=false,world=false;
 int currentTarget=-1;
 int boundPart=-2;
 void* drawBuffer=nullptr;
@@ -43,14 +42,28 @@ std::vector<CachedPart> cache(std::size(pspParts));
 std::size_t cacheBytes=0;
 std::vector<unsigned char> compressedScratch;
 enum class Kind {Texture,Rect,Circle,Subtract,Normal};
-struct Command {Kind kind;Texture2D tex{};Rectangle src{},dst{};Vector2 origin{};float angle{};Color color{},edge{};Camera2D cam{};bool world{};};
+struct Command {Kind kind;Texture2D tex{};Rectangle src{},dst{};Vector2 origin{};float angle{};Color color{},edge{};bool world{};};
 std::vector<Command> commands;
 struct Vertex {float u,v;unsigned color;float x,y,z;};
+std::vector<Vertex> spriteBatch;
+bool batchingSprites=false;
+int batchPart=-1;
 unsigned rgba(Color c){return c.r|(c.g<<8)|(c.b<<16)|(c.a<<24);}
 int exitCallback(int,int,void*){quitting=true;return 0;}
 int callbackThread(SceSize,void*){int cb=sceKernelCreateCallback("ElliExit",exitCallback,nullptr);sceKernelRegisterExitCallback(cb);sceKernelSleepThreadCB();return 0;}
-void startList(){if(!listOpen){sceGuStart(GU_DIRECT,displayList);listOpen=true;}}
-void syncList(){if(listOpen){sceGuFinish();sceGuSync(0,0);listOpen=false;}}
+void presentPending(){
+    if(!gpuPending)return;
+    sceGuSync(0,0);
+    sceDisplayWaitVblankStart();
+    drawBuffer=sceGuSwapBuffers();
+    gpuPending=false;
+}
+void startList(){if(!listOpen){presentPending();sceGuStart(GU_DIRECT,displayList);listOpen=true;}}
+void syncList(){
+    if(listOpen){sceGuFinish();sceGuSync(0,0);listOpen=false;}
+    else if(gpuPending){sceGuSync(0,0);gpuPending=false;}
+}
+void submitList(){if(listOpen){sceGuFinish();listOpen=false;gpuPending=true;}}
 void normalBlend(){sceGuEnable(GU_BLEND);sceGuBlendFunc(GU_ADD,GU_SRC_ALPHA,GU_ONE_MINUS_SRC_ALPHA,0,0);}
 void target(int id){
     startList();currentTarget=id;boundPart=-2;
@@ -77,7 +90,7 @@ int assetId(const char* path){
     if(pos!=std::string::npos)p=p.substr(pos);
     auto found=map.find(p);return found==map.end()?-1:found->second;
 }
-void* partPixels(std::size_t index){
+void* partPixels(std::size_t index,bool protectCurrent=true){
     auto& c=cache[index];c.used=serial;
     if(c.pixels)return c.pixels;
     const auto& part=pspParts[index];
@@ -86,7 +99,7 @@ void* partPixels(std::size_t index){
     constexpr std::size_t cacheLimit=10*1024*1024;
     while(cacheBytes+bytes>cacheLimit){
         std::size_t oldest=cache.size();
-        for(std::size_t i=0;i<cache.size();++i)if(cache[i].pixels&&cache[i].used<serial&&
+        for(std::size_t i=0;i<cache.size();++i)if(cache[i].pixels&&(!protectCurrent||cache[i].used<serial)&&
             (oldest==cache.size()||cache[i].used<cache[oldest].used))oldest=i;
         if(oldest==cache.size())break;
         std::free(cache[oldest].pixels);cache[oldest].pixels=nullptr;
@@ -105,10 +118,26 @@ Vector2 position(float x,float y){
     if(world){x=(x-camera.target.x)*camera.zoom+camera.offset.x;y=(y-camera.target.y)*camera.zoom+camera.offset.y;}
     return {x*outputScale+offsetX,y*outputScale+offsetY};
 }
+void flushSpriteBatch(){
+    if(spriteBatch.empty())return;
+    auto* vertices=static_cast<Vertex*>(sceGuGetMemory(spriteBatch.size()*sizeof(Vertex)));
+    std::memcpy(vertices,spriteBatch.data(),spriteBatch.size()*sizeof(Vertex));
+    sceGuDrawArray(GU_SPRITES,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,
+                   static_cast<int>(spriteBatch.size()),nullptr,vertices);
+    spriteBatch.clear();
+}
+void bindTexturePart(int index,void* pixels){
+    if(boundPart==index)return;
+    const auto& part=pspParts[index];
+    sceGuTexMode(GU_PSM_8888,0,0,0);sceGuTexImage(0,part.tw,part.th,part.tw,pixels);
+    sceGuTexFunc(GU_TFX_MODULATE,GU_TCC_RGBA);sceGuTexFilter(GU_NEAREST,GU_NEAREST);
+    sceGuTexWrap(GU_CLAMP,GU_CLAMP);sceGuTexScale(1,1);sceGuTexOffset(0,0);sceGuTexFlush();boundPart=index;
+}
 void textureNow(Texture2D t,Rectangle src,Rectangle dst,Vector2 origin,float angle,Color tint){
     if(!t.id)return;
     if(t.id&0x80000000u){
-        boundPart=-2;
+        if(batchingSprites)flushSpriteBatch();
+        boundPart=-2;batchPart=-1;
         sceGuTexSync();sceGuTexFlush();
         sceGuEnable(GU_TEXTURE_2D);sceGuTexMode(GU_PSM_8888,0,0,0);
         sceGuTexImage(0,512,256,512,reinterpret_cast<void*>(0x04000000+lightOffset));
@@ -121,9 +150,11 @@ void textureNow(Texture2D t,Rectangle src,Rectangle dst,Vector2 origin,float ang
     const auto& asset=pspAssets[t.id-1];
     const float sw=std::abs(src.width),sh=std::abs(src.height);if(sw<=0||sh<=0)return;
     const float zoom=(world?camera.zoom:1)*outputScale;
-    const float cs=std::cos(angle*PI/180),sn=std::sin(angle*PI/180);
     const auto anchor=position(dst.x,dst.y);
     const bool fx=src.width<0,fy=src.height<0;
+    const bool axisAligned=std::abs(angle)<0.0001F;
+    const float cs=axisAligned?1.0F:std::cos(angle*PI/180),sn=axisAligned?0.0F:std::sin(angle*PI/180);
+    const unsigned vertexColour=rgba(tint);
     int first=0,last=asset.count;
     if(src.x>=0&&src.y>=0&&sw<=256&&sh<=256){
         const int candidate=int(src.y/256)*((asset.width+255)/256)+int(src.x/256);
@@ -138,25 +169,48 @@ void textureNow(Texture2D t,Rectangle src,Rectangle dst,Vector2 origin,float ang
         const float x0=((fx?src.x+sw-r:l-src.x)*dst.width/sw-origin.x)*zoom;
         const float y0=((fy?src.y+sh-b:top-src.y)*dst.height/sh-origin.y)*zoom;
         const float x1=x0+(r-l)*dst.width/sw*zoom,y1=y0+(b-top)*dst.height/sh*zoom;
-        Vector2 points[4];const float xs[4]={x0,x1,x0,x1},ys[4]={y0,y0,y1,y1};
-        float minx=1e9f,miny=1e9f,maxx=-1e9f,maxy=-1e9f;
-        for(int j=0;j<4;++j){points[j]={anchor.x+xs[j]*cs-ys[j]*sn,anchor.y+xs[j]*sn+ys[j]*cs};minx=std::min(minx,points[j].x);maxx=std::max(maxx,points[j].x);miny=std::min(miny,points[j].y);maxy=std::max(maxy,points[j].y);}
+        Vector2 points[4];
+        float minx,maxx,miny,maxy;
+        if(axisAligned){
+            points[0]={anchor.x+x0,anchor.y+y0};points[1]={anchor.x+x1,anchor.y+y0};
+            points[2]={anchor.x+x0,anchor.y+y1};points[3]={anchor.x+x1,anchor.y+y1};
+            minx=std::min(points[0].x,points[3].x);maxx=std::max(points[0].x,points[3].x);
+            miny=std::min(points[0].y,points[3].y);maxy=std::max(points[0].y,points[3].y);
+        }else{
+            const float xs[4]={x0,x1,x0,x1},ys[4]={y0,y0,y1,y1};
+            minx=miny=1e9f;maxx=maxy=-1e9f;
+            for(int j=0;j<4;++j){points[j]={anchor.x+xs[j]*cs-ys[j]*sn,anchor.y+xs[j]*sn+ys[j]*cs};minx=std::min(minx,points[j].x);maxx=std::max(maxx,points[j].x);miny=std::min(miny,points[j].y);maxy=std::max(maxy,points[j].y);}
+        }
         if(maxx<=clipLeft||maxy<=clipTop||minx>=clipRight||miny>=clipBottom)continue;
         void* pixels=partPixels(index);
         sceGuEnable(GU_TEXTURE_2D);
-        if(boundPart!=index){
-            sceGuTexMode(GU_PSM_8888,0,0,0);sceGuTexImage(0,part.tw,part.th,part.tw,pixels);
-            sceGuTexFunc(GU_TFX_MODULATE,GU_TCC_RGBA);sceGuTexFilter(GU_NEAREST,GU_NEAREST);
-            sceGuTexWrap(GU_CLAMP,GU_CLAMP);sceGuTexScale(1,1);sceGuTexOffset(0,0);sceGuTexFlush();boundPart=index;
-        }
         const float u0=(fx?r:l)-part.x,u1=(fx?l:r)-part.x,v0=(fy?b:top)-part.y,v1=(fy?top:b)-part.y;
-        auto* v=static_cast<Vertex*>(sceGuGetMemory(4*sizeof(Vertex)));
-        v[0]={u0,v0,rgba(tint),points[0].x,points[0].y,0};v[1]={u1,v0,rgba(tint),points[1].x,points[1].y,0};
-        v[2]={u0,v1,rgba(tint),points[2].x,points[2].y,0};v[3]={u1,v1,rgba(tint),points[3].x,points[3].y,0};
-        sceGuDrawArray(GU_TRIANGLE_STRIP,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,4,nullptr,v);
+        if(batchingSprites&&axisAligned&&points[3].x>=points[0].x&&points[3].y>=points[0].y){
+            if(batchPart!=index){flushSpriteBatch();bindTexturePart(index,pixels);batchPart=index;}
+            // Keep each primitive comfortably below the GE transfer limit.
+            // Very large room-tile submissions could otherwise manifest as a
+            // transient solid-colour rectangle on real PSP hardware.
+            if(spriteBatch.size()>=256)flushSpriteBatch();
+            spriteBatch.push_back({u0,v0,vertexColour,points[0].x,points[0].y,0});
+            spriteBatch.push_back({u1,v1,vertexColour,points[3].x,points[3].y,0});
+        }else if(axisAligned&&points[3].x>=points[0].x&&points[3].y>=points[0].y){
+            bindTexturePart(index,pixels);
+            auto* v=static_cast<Vertex*>(sceGuGetMemory(2*sizeof(Vertex)));
+            v[0]={u0,v0,vertexColour,points[0].x,points[0].y,0};
+            v[1]={u1,v1,vertexColour,points[3].x,points[3].y,0};
+            sceGuDrawArray(GU_SPRITES,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,2,nullptr,v);
+        }else{
+            if(batchingSprites)flushSpriteBatch();
+            bindTexturePart(index,pixels);batchPart=index;
+            auto* v=static_cast<Vertex*>(sceGuGetMemory(4*sizeof(Vertex)));
+            v[0]={u0,v0,vertexColour,points[0].x,points[0].y,0};v[1]={u1,v0,vertexColour,points[1].x,points[1].y,0};
+            v[2]={u0,v1,vertexColour,points[2].x,points[2].y,0};v[3]={u1,v1,vertexColour,points[3].x,points[3].y,0};
+            sceGuDrawArray(GU_TRIANGLE_STRIP,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,4,nullptr,v);
+        }
     }
 }
 void rectNow(Rectangle r,Color c){
+    if(batchingSprites)flushSpriteBatch();
     auto p=position(r.x,r.y);float z=(world?camera.zoom:1)*outputScale;
     const float x2=p.x+r.width*z,y2=p.y+r.height*z;
     if(std::max(p.x,x2)<=clipLeft||std::max(p.y,y2)<=clipTop||
@@ -166,6 +220,7 @@ void rectNow(Rectangle r,Color c){
     sceGuDrawArray(GU_SPRITES,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,2,nullptr,v);
 }
 void circleNow(Rectangle r,Color center,Color edge){
+    if(batchingSprites)flushSpriteBatch();
     auto p=position(r.x,r.y);const float radius=r.width*(world?camera.zoom:1)*outputScale;
     if(p.x+radius<=clipLeft||p.y+radius<=clipTop||p.x-radius>=clipRight||p.y-radius>=clipBottom)return;
     // At the native 218-pixel viewport, 32 sides are visually circular while
@@ -177,28 +232,23 @@ void circleNow(Rectangle r,Color center,Color edge){
     sceGuDrawArray(GU_TRIANGLE_FAN,GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D,34,nullptr,v);
 }
 void replay(){
-    // Pixel-perfect keeps every source pixel 1:1. Full screen uses one uniform
-    // scale, so the 384x218 camera fills the PSP height without distortion.
-    outputScale=fullScreenView?272.0f/218.0f:1.0f;
+    // The PSP has one display mode: proportional full screen. Filling the
+    // physical height leaves less than one pixel of horizontal margin and
+    // preserves the original 384x218 aspect ratio without stretching.
+    outputScale=272.0f/218.0f;
     offsetX=(480.0f-384.0f*outputScale)*0.5f;
-    offsetY=(272.0f-218.0f*outputScale)*0.5f;
-    const int left=std::max(0,int(std::floor(offsetX)));
-    const int top=std::max(0,int(std::floor(offsetY)));
-    const int right=std::min(480,int(std::ceil(offsetX+384.0f*outputScale)));
-    const int bottom=std::min(272,int(std::ceil(offsetY+218.0f*outputScale)));
-    // BeginDrawing/ClearBackground already clears the complete physical
-    // framebuffer once. Narrowing the scissor here preserves the black border
-    // and prevents all world drawing outside the viewport at zero extra fill.
-    clipLeft=static_cast<float>(left);clipTop=static_cast<float>(top);
-    clipRight=static_cast<float>(right);clipBottom=static_cast<float>(bottom);
-    sceGuScissor(left,top,right,bottom);
-    for(const auto& c:commands){camera=c.cam;world=c.world;switch(c.kind){
+    offsetY=0;
+    clipLeft=clipTop=0;clipRight=480;clipBottom=272;
+    sceGuScissor(0,0,480,272);
+    spriteBatch.clear();batchPart=-1;batchingSprites=true;
+    for(const auto& c:commands){world=c.world;switch(c.kind){
         case Kind::Texture:textureNow(c.tex,c.src,c.dst,c.origin,c.angle,c.color);break;
         case Kind::Rect:rectNow(c.dst,c.color);break;
         case Kind::Circle:circleNow(c.dst,c.color,c.edge);break;
-        case Kind::Subtract:sceGuBlendFunc(GU_ADD,GU_FIX,GU_ONE_MINUS_SRC_COLOR,0,0);break;
-        case Kind::Normal:normalBlend();break;
+        case Kind::Subtract:flushSpriteBatch();sceGuBlendFunc(GU_ADD,GU_FIX,GU_ONE_MINUS_SRC_COLOR,0,0);break;
+        case Kind::Normal:flushSpriteBatch();normalBlend();break;
     }}
+    flushSpriteBatch();batchingSprites=false;batchPart=-1;
     offsetX=offsetY=0;outputScale=1;world=false;
     clipLeft=clipTop=0;clipRight=480;clipBottom=272;
     sceGuScissor(0,0,480,272);normalBlend();
@@ -211,7 +261,7 @@ unsigned keyMask(int key){switch(key){
     case KEY_ENTER:return PSP_CTRL_CROSS|PSP_CTRL_CIRCLE;
     case KEY_ESCAPE:return PSP_CTRL_START;default:return 0;
 }}
-struct Clip{std::vector<short> pcm;FILE* stream{};float gain=1;bool loop=true,paused=false;};
+struct Clip{std::vector<short> pcm;float gain=1;bool paused=false;};
 struct Voice{unsigned clip{};std::size_t cursor{};};
 std::vector<Clip*> clips(1,nullptr);Voice voices[24]{};
 int sfxVoice=1,audioChannel=-1,audioThread=-1,audioLock=-1;
@@ -222,32 +272,31 @@ void unlockAudio(){if(audioLock>=0)sceKernelSignalSema(audioLock,1);}
 Clip* clip(unsigned id){return id<clips.size()?clips[id]:nullptr;}
 std::string pcmPath(const char* path){establishRoot(path);std::string p=path;auto s=p.find_last_of("/\\");p=p.substr(s==std::string::npos?0:s+1);p=p.substr(0,p.find_last_of('.'));for(auto& c:p)if(c>='a'&&c<='z')c-=32;return dataRoot+p+".PCM";}
 int audioWorker(SceSize,void*){
-    int slot=0;int mix[2048];short music[2048];
+    int slot=0;int mix[2048];
     while(audioRunning){
         std::memset(mix,0,sizeof(mix));lockAudio();
         for(auto& voice:voices){auto* c=clip(voice.clip);if(!c||c->paused)continue;
-            const float gain=c->gain*masterGain;
-            if(c->stream){
-                std::size_t count=std::fread(music,sizeof(short),2048,c->stream);
-                if(count<2048&&c->loop){std::rewind(c->stream);count+=std::fread(music+count,sizeof(short),2048-count,c->stream);}
-                for(std::size_t i=0;i<count;++i)mix[i]+=int(music[i]*gain);
-            }else{
-                const std::size_t count=std::min<std::size_t>(2048,c->pcm.size()-voice.cursor);
-                for(std::size_t i=0;i<count;++i)mix[i]+=int(c->pcm[voice.cursor+i]*gain);
-                voice.cursor+=count;if(voice.cursor>=c->pcm.size())voice.clip=0;
-            }
+            // One fixed-point conversion per active voice avoids thousands of
+            // floating-point multiplies in every 1024-frame audio block.
+            const int gain=static_cast<int>(std::lround(c->gain*masterGain*256.0F));
+            const std::size_t count=std::min<std::size_t>(2048,c->pcm.size()-voice.cursor);
+            for(std::size_t i=0;i<count;++i)mix[i]+=(int(c->pcm[voice.cursor+i])*gain)>>8;
+            voice.cursor+=count;if(voice.cursor>=c->pcm.size())voice.clip=0;
         }
         unlockAudio();for(int i=0;i<2048;++i)audioBuffer[slot][i]=std::clamp(mix[i],-32768,32767);
         sceAudioOutputPannedBlocking(audioChannel,PSP_AUDIO_VOLUME_MAX,PSP_AUDIO_VOLUME_MAX,audioBuffer[slot]);slot^=1;
     }return 0;
 }
-void releaseClip(unsigned id){lockAudio();auto* c=clip(id);if(c){for(auto& v:voices)if(v.clip==id)v={};if(c->stream)std::fclose(c->stream);delete c;clips[id]=nullptr;}unlockAudio();}
+void releaseClip(unsigned id){lockAudio();auto* c=clip(id);if(c){for(auto& v:voices)if(v.clip==id)v={};delete c;clips[id]=nullptr;}unlockAudio();}
 int utf8(const char*& s){unsigned c=(unsigned char)*s++;if(c<128)return c;int n=(c&0xe0)==0xc0?1:(c&0xf0)==0xe0?2:3;int v=c&((1<<(6-n))-1);while(n--&&*s)v=(v<<6)|((unsigned char)*s++&63);return v;}
 }
 
 void SetConfigFlags(unsigned){}void ClearWindowState(unsigned){}
 void InitWindow(int,int,const char*){
     if(initialized)return;
+    // All retail PSP models supported by this port expose the standard 333 MHz
+    // game clock. Request it explicitly instead of inheriting a 222 MHz shell
+    // clock from the launcher/CFW.
     scePowerSetClockFrequency(333,333,166);
     sceCtrlSetSamplingCycle(0);sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     int cb=sceKernelCreateThread("ElliCallbacks",callbackThread,0x11,4096,0,nullptr);if(cb>=0)sceKernelStartThread(cb,0,nullptr);
@@ -256,14 +305,14 @@ void InitWindow(int,int,const char*){
     sceGuOffset(2048-240,2048-136);sceGuViewport(2048,2048,480,272);
     sceGuDisable(GU_DEPTH_TEST);sceGuDisable(GU_CULL_FACE);sceGuDisable(GU_LIGHTING);
     sceGuShadeModel(GU_SMOOTH);sceGuScissor(0,0,480,272);sceGuEnable(GU_SCISSOR_TEST);normalBlend();
-    syncList();sceDisplayWaitVblankStart();sceGuDisplay(GU_TRUE);commands.reserve(4096);compressedScratch.reserve(256*1024);initialized=true;
+    syncList();sceDisplayWaitVblankStart();sceGuDisplay(GU_TRUE);commands.reserve(4096);spriteBatch.reserve(8192);compressedScratch.reserve(256*1024);initialized=true;
 }
 void CloseWindow(){if(!initialized)return;syncList();sceGuTerm();for(auto& c:cache)std::free(c.pixels);if(textureFile)std::fclose(textureFile);if(maskFile)std::fclose(maskFile);initialized=false;}
 bool WindowShouldClose(){unsigned previous=held;sceCtrlPeekBufferPositive(&pad,1);held=pad.Buttons;if(pad.Lx<96)held|=PSP_CTRL_LEFT;if(pad.Lx>160)held|=PSP_CTRL_RIGHT;if(pad.Ly<96)held|=PSP_CTRL_UP;if(pad.Ly>160)held|=PSP_CTRL_DOWN;pressed=held&~previous;return quitting;}
 void SetExitKey(int){}void SetTargetFPS(int){}int GetScreenWidth(){return 480;}int GetScreenHeight(){return 272;}
 double GetTime(){return sceKernelGetSystemTimeWide()/1000000.0;}
 void BeginDrawing(){screen=true;target(-1);world=false;}
-void EndDrawing(){syncList();sceDisplayWaitVblankStart();drawBuffer=sceGuSwapBuffers();screen=false;currentTarget=-1;++serial;}
+void EndDrawing(){submitList();screen=false;currentTarget=-1;++serial;}
 void ClearBackground(Color c){if(currentTarget==0&&!screen){commands.clear();return;}startList();sceGuClearColor(rgba(c));sceGuClear(GU_COLOR_BUFFER_BIT);}
 void BeginMode2D(Camera2D c){camera=c;world=true;}void EndMode2D(){world=false;}
 Vector2 GetWorldToScreen2D(Vector2 p,Camera2D c){return{(p.x-c.target.x)*c.zoom+c.offset.x,(p.y-c.target.y)*c.zoom+c.offset.y};}
@@ -272,15 +321,20 @@ void UnloadRenderTexture(RenderTexture2D){}
 void BeginTextureMode(RenderTexture2D t){currentTarget=int(t.id&0x7fffffffu)-1;if(currentTarget==1)target(1);}
 void EndTextureMode(){currentTarget=-1;world=false;}
 Texture2D LoadTexture(const char* p){int i=assetId(p);return i<0?Texture2D{}:Texture2D{unsigned(i+1),pspAssets[i].width,pspAssets[i].height,1,0};}
+void PreloadTexture(Texture2D texture){
+    if(!texture.id||(texture.id&0x80000000u))return;
+    const auto& asset=pspAssets[texture.id-1];
+    for(int part=0;part<asset.count;++part)(void)partPixels(static_cast<std::size_t>(asset.first+part),false);
+}
 void UnloadTexture(Texture2D){}void SetTextureFilter(Texture2D,int){}
 Image LoadImage(const char* p){int i=assetId(p);if(i<0)return{};auto& a=pspAssets[i];std::vector<unsigned char> compressed(a.maskSize),alpha(a.width*a.height);std::fseek(maskFile,a.maskOffset,SEEK_SET);std::fread(compressed.data(),1,a.maskSize,maskFile);uLongf count=alpha.size();if(uncompress(alpha.data(),&count,compressed.data(),compressed.size())!=Z_OK)return{};auto* colors=static_cast<Color*>(std::malloc(count*sizeof(Color)));if(!colors)return{};for(unsigned n=0;n<count;++n)colors[n]={255,255,255,alpha[n]};return{colors,a.width,a.height,1,0};}
 Color* LoadImageColors(Image i){auto* c=static_cast<Color*>(std::malloc(i.width*i.height*sizeof(Color)));if(c&&i.data)std::memcpy(c,i.data,i.width*i.height*sizeof(Color));return c;}
 void UnloadImageColors(Color* c){std::free(c);}void UnloadImage(Image i){std::free(i.data);}
-void DrawTexturePro(Texture2D t,Rectangle s,Rectangle d,Vector2 o,float r,Color c){if(currentTarget==0&&!screen){commands.push_back({Kind::Texture,t,s,d,o,r,c,{},camera,world});return;}if(screen&&t.id==0x80000001u){replay();return;}textureNow(t,s,d,o,r,c);}
+void DrawTexturePro(Texture2D t,Rectangle s,Rectangle d,Vector2 o,float r,Color c){if(currentTarget==0&&!screen){commands.push_back({Kind::Texture,t,s,d,o,r,c,{},world});return;}if(screen&&t.id==0x80000001u){replay();return;}textureNow(t,s,d,o,r,c);}
 void DrawTextureRec(Texture2D t,Rectangle s,Vector2 p,Color c){DrawTexturePro(t,s,{p.x,p.y,std::abs(s.width),std::abs(s.height)},{},0,c);}
-void DrawRectangle(int x,int y,int w,int h,Color c){Rectangle r{float(x),float(y),float(w),float(h)};if(currentTarget==0&&!screen){commands.push_back({Kind::Rect,{},{},r,{},0,c,{},camera,world});return;}rectNow(r,c);}
+void DrawRectangle(int x,int y,int w,int h,Color c){Rectangle r{float(x),float(y),float(w),float(h)};if(currentTarget==0&&!screen){commands.push_back({Kind::Rect,{},{},r,{},0,c,{},world});return;}rectNow(r,c);}
 void DrawRectangleLinesEx(Rectangle r,float t,Color c){DrawRectangle(r.x,r.y,r.width,t,c);DrawRectangle(r.x,r.y+r.height-t,r.width,t,c);DrawRectangle(r.x,r.y,t,r.height,c);DrawRectangle(r.x+r.width-t,r.y,t,r.height,c);}
-void DrawCircleGradient(int x,int y,float radius,Color a,Color b){Rectangle r{float(x),float(y),radius,0};if(currentTarget==0&&!screen){commands.push_back({Kind::Circle,{},{},r,{},0,a,b,camera,world});return;}circleNow(r,a,b);}
+void DrawCircleGradient(int x,int y,float radius,Color a,Color b){Rectangle r{float(x),float(y),radius,0};if(currentTarget==0&&!screen){commands.push_back({Kind::Circle,{},{},r,{},0,a,b,world});return;}circleNow(r,a,b);}
 bool CheckCollisionRecs(Rectangle a,Rectangle b){return a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;}
 void BeginBlendMode(int){if(currentTarget==0&&!screen){commands.push_back({Kind::Subtract});return;}sceGuBlendFunc(GU_ADD,GU_FIX,GU_ONE_MINUS_SRC_COLOR,0,0);}
 void EndBlendMode(){if(currentTarget==0&&!screen){commands.push_back({Kind::Normal});return;}normalBlend();}
@@ -294,7 +348,7 @@ bool IsKeyDown(int k){return held&keyMask(k);}bool IsKeyPressed(int k){return pr
 bool IsGamepadButtonDown(int,int){return false;}bool IsGamepadButtonPressed(int,int){return false;}
 float GetGamepadAxisMovement(int,int axis){return std::clamp(((axis==GAMEPAD_AXIS_LEFT_Y?pad.Ly:pad.Lx)-128)/127.0f,-1.0f,1.0f);}
 bool IsMouseButtonPressed(int){return false;}Vector2 GetMousePosition(){return{-1000,-1000};}
-int GetRandomValue(int a,int b){return a+std::rand()%(b-a+1);}void ToggleFullscreen(){fullScreenView=!fullScreenView;}bool IsWindowFullscreen(){return fullScreenView;}void TakeScreenshot(const char*){}
+int GetRandomValue(int a,int b){return a+std::rand()%(b-a+1);}void ToggleFullscreen(){}bool IsWindowFullscreen(){return true;}void TakeScreenshot(const char*){}
 void TraceLog(int,const char* fmt,...){va_list args;va_start(args,fmt);std::vprintf(fmt,args);std::printf("\n");va_end(args);}
 void InitAudioDevice(){audioChannel=sceAudioChReserve(PSP_AUDIO_NEXT_CHANNEL,1024,PSP_AUDIO_FORMAT_STEREO);audioLock=sceKernelCreateSema("ElliAudioLock",0,1,1,nullptr);audioRunning=audioChannel>=0;audioThread=sceKernelCreateThread("ElliAudio",audioWorker,0x12,64*1024,PSP_THREAD_ATTR_USER,nullptr);if(audioRunning&&audioThread>=0)sceKernelStartThread(audioThread,0,nullptr);}
 void CloseAudioDevice(){audioRunning=false;if(audioThread>=0){sceKernelWaitThreadEnd(audioThread,nullptr);sceKernelDeleteThread(audioThread);}if(audioChannel>=0)sceAudioChRelease(audioChannel);for(std::size_t i=1;i<clips.size();++i)releaseClip(i);if(audioLock>=0)sceKernelDeleteSema(audioLock);audioLock=-1;}
@@ -303,10 +357,6 @@ Sound LoadSound(const char* p){auto path=pcmPath(p);FILE* f=std::fopen(path.c_st
 void UnloadSound(Sound s){releaseClip(s.id);}bool IsSoundValid(Sound s){return clip(s.id);}
 void SetSoundVolume(Sound s,float gain){lockAudio();if(auto* c=clip(s.id))c->gain=gain;unlockAudio();}
 void PlaySound(Sound s){lockAudio();voices[sfxVoice]={s.id,0};sfxVoice=sfxVoice%23+1;unlockAudio();}
-Music LoadMusicStream(const char* p){FILE* f=std::fopen(pcmPath(p).c_str(),"rb");if(!f)return{};std::setvbuf(f,nullptr,_IOFBF,32768);auto* c=new Clip;c->stream=f;lockAudio();clips.push_back(c);unsigned id=clips.size()-1;unlockAudio();return{id,true};}
-void UnloadMusicStream(Music m){releaseClip(m.id);}bool IsMusicValid(Music m){return clip(m.id);}
-void PlayMusicStream(Music m){lockAudio();if(auto* c=clip(m.id)){c->loop=m.looping;c->paused=false;voices[0]={m.id,0};}unlockAudio();}
-void StopMusicStream(Music m){lockAudio();if(voices[0].clip==m.id)voices[0]={};unlockAudio();}
-void PauseMusicStream(Music m){lockAudio();if(auto* c=clip(m.id))c->paused=true;unlockAudio();}
-void ResumeMusicStream(Music m){lockAudio();if(auto* c=clip(m.id))c->paused=false;unlockAudio();}
-void UpdateMusicStream(Music){}void SetMusicVolume(Music m,float v){SetSoundVolume({m.id},v);}
+Music LoadMusicStream(const char*){return{};}void UnloadMusicStream(Music){}bool IsMusicValid(Music){return false;}
+void PlayMusicStream(Music){}void StopMusicStream(Music){}void PauseMusicStream(Music){}void ResumeMusicStream(Music){}
+void UpdateMusicStream(Music){}void SetMusicVolume(Music,float){}

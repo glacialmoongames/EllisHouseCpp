@@ -28,12 +28,14 @@ void beginGmSubtract() {
                               RL_FUNC_ADD, RL_FUNC_ADD);
     BeginBlendMode(BLEND_CUSTOM_SEPARATE);
 }
+#ifndef __PSP__
 const std::unordered_map<std::string,std::string>& roomMusicMapping() {
     static const std::unordered_map<std::string,std::string> mapping{
         {"rm_menu","snd_menu"},{"rm_0","snd_01"},{"rm_1","snd_02"},{"rm_2","snd_03"},
         {"rm_3","snd_04"},{"rm_4","snd_05"},{"rm_5","snd_06"},{"rm_boss","snd_boss"},{"rm_end","snd_end"}};
     return mapping;
 }
+#endif
 }
 
 Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), root_(std::move(root)) {
@@ -69,14 +71,8 @@ Game::Game(GameData data, std::filesystem::path root) : data_(std::move(data)), 
         Sound loaded=LoadSound((root_/definition.path).string().c_str());
         if (IsSoundValid(loaded)) sounds_.emplace(name,loaded);
     }
-    // The browser owns presentation timing through requestAnimationFrame. A raylib
-    // frame limiter would call emscripten_sleep(), which requires Asyncify and can
-    // abort before the first frame. Gameplay remains a deterministic 45 Hz step.
-#ifdef __EMSCRIPTEN__
-    SetTargetFPS(0);
-#else
+    // VSync drives presentation; gameplay remains a deterministic 45 Hz fixed step.
     SetTargetFPS(120);
-#endif
     target_ = LoadRenderTexture(kViewWidth, kViewHeight);
     lightTarget_ = LoadRenderTexture(kViewWidth, kViewHeight);
     SetTextureFilter(target_.texture, TEXTURE_FILTER_POINT);
@@ -147,7 +143,9 @@ Game::~Game() {
         for (auto& texture : frames.frames) UnloadTexture(texture);
     }
     for (auto& [name, sound] : sounds_) { (void)name; UnloadSound(sound); }
+#ifndef __PSP__
     if (musicLoaded_) UnloadMusicStream(music_);
+#endif
     if (fontLoaded_) UnloadFont(font_);
     UnloadRenderTexture(target_);
     UnloadRenderTexture(lightTarget_);
@@ -185,7 +183,7 @@ void Game::run() {
 #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop_arg([](void* context) {
         static_cast<Game*>(context)->runFrame();
-    },this,0,false);
+    },this,0,true);
 #else
     // runFrame() is the single input pump. Console backends update their
     // pressed-edge state inside WindowShouldClose(), so polling here as well
@@ -344,6 +342,11 @@ void Game::playSound(const std::string& name, float volume) {
 }
 
 void Game::setRoomMusic() {
+#ifdef __PSP__
+    // PSP package intentionally contains sound effects only. Keeping this a
+    // compile-time no-op removes stream I/O, mixing and room-change stalls.
+    return;
+#else
     const auto& mapping=roomMusicMapping();
     const auto selected = mapping.find(room_->name);
     const std::string wanted = selected == mapping.end() ? "" : selected->second;
@@ -370,6 +373,7 @@ void Game::setRoomMusic() {
     SetMusicVolume(music_, definition->second.volume*gain);
     PlayMusicStream(music_);
     musicLoaded_ = true;
+#endif
 }
 
 void Game::preloadNextRoomMusic() {
@@ -469,6 +473,15 @@ const Game::CollisionMask& Game::mask(const std::string& spriteName, float frame
             UnloadImageColors(pixels); UnloadImage(image);
         }
     }
+#ifdef __PSP__
+    if(result.width>0&&result.height>0&&!result.solid.empty()) {
+        result.wordsPerRow=(result.width+31)/32;
+        result.rowBits.assign(static_cast<std::size_t>(result.wordsPerRow*result.height),0);
+        for(int y=0;y<result.height;++y)for(int x=0;x<result.width;++x)
+            if(result.solid[static_cast<std::size_t>(y*result.width+x)])
+                result.rowBits[static_cast<std::size_t>(y*result.wordsPerRow+x/32)]|=1U<<(x&31);
+    }
+#endif
     auto [it, inserted] = masks_.emplace(key, std::move(result));
     (void)inserted;
     return it->second;
@@ -490,6 +503,35 @@ bool Game::instanceCollision(const Rectangle& bounds, const InstanceDef& instanc
     const int top = static_cast<int>(std::floor(std::max(bounds.y, other.y)));
     const int right = static_cast<int>(std::ceil(std::min(bounds.x + bounds.width, other.x + other.width)));
     const int bottom = static_cast<int>(std::ceil(std::min(bounds.y + bounds.height, other.y + other.height)));
+#ifdef __PSP__
+    if(bits.wordsPerRow>0&&!bits.rowBits.empty()&&
+       std::abs(std::abs(instance.scaleX)-1.0F)<0.0001F&&
+       std::abs(std::abs(instance.scaleY)-1.0F)<0.0001F&&right>left&&bottom>top) {
+        const auto sampleX=[&](int x){return static_cast<int>(std::floor((x+0.5F-instance.x)/instance.scaleX+spr->originX));};
+        const auto sampleY=[&](int y){return static_cast<int>(std::floor((y+0.5F-instance.y)/instance.scaleY+spr->originY));};
+        int minX=std::max(0,std::min(sampleX(left),sampleX(right-1)));
+        int maxX=std::min(bits.width-1,std::max(sampleX(left),sampleX(right-1)));
+        int minY=std::max(0,std::min(sampleY(top),sampleY(bottom-1)));
+        int maxY=std::min(bits.height-1,std::max(sampleY(top),sampleY(bottom-1)));
+        if(minX<=maxX&&minY<=maxY) {
+            const int firstWord=minX/32,lastWord=maxX/32;
+            const std::uint32_t firstMask=0xFFFFFFFFU<<(minX&31);
+            const int lastBit=maxX&31;
+            const std::uint32_t lastMask=lastBit==31?0xFFFFFFFFU:((1U<<(lastBit+1))-1U);
+            for(int y=minY;y<=maxY;++y) {
+                const auto* row=bits.rowBits.data()+static_cast<std::size_t>(y*bits.wordsPerRow);
+                if(firstWord==lastWord) {
+                    if(row[firstWord]&(firstMask&lastMask))return true;
+                } else {
+                    if((row[firstWord]&firstMask)||(row[lastWord]&lastMask))return true;
+                    for(int word=firstWord+1;word<lastWord;++word)if(row[word])return true;
+                }
+            }
+            return false;
+        }
+        return false;
+    }
+#endif
     for (int y = top; y < bottom; ++y) for (int x = left; x < right; ++x) {
         const int sx = static_cast<int>(std::floor((x + 0.5F - instance.x) / instance.scaleX + spr->originX));
         const int sy = static_cast<int>(std::floor((y + 0.5F - instance.y) / instance.scaleY + spr->originY));
@@ -511,8 +553,31 @@ bool Game::collidesWithProfile(float x, float y, bool lowProfile) {
         }
         return instance.active && instanceCollision(bounds, instance);
     };
+#ifdef __PSP__
+    // Player movement probes run several times per simulation step. Query only
+    // the structural cells touched by the small player hitbox instead of
+    // scanning every wall and platform in large rooms.
+    if(collisionGridColumns_>0&&collisionGridRows_>0) {
+        constexpr float cellSize=128.0F;
+        if(++collisionQueryStamp_==0) {
+            std::fill(collisionVisitStamp_.begin(),collisionVisitStamp_.end(),0);
+            collisionQueryStamp_=1;
+        }
+        const int left=std::clamp(static_cast<int>(std::floor(bounds.x/cellSize)),0,collisionGridColumns_-1);
+        const int right=std::clamp(static_cast<int>(std::floor((bounds.x+std::max(0.0F,bounds.width-0.001F))/cellSize)),0,collisionGridColumns_-1);
+        const int top=std::clamp(static_cast<int>(std::floor(bounds.y/cellSize)),0,collisionGridRows_-1);
+        const int bottom=std::clamp(static_cast<int>(std::floor((bounds.y+std::max(0.0F,bounds.height-0.001F))/cellSize)),0,collisionGridRows_-1);
+        for(int cy=top;cy<=bottom;++cy)for(int cx=left;cx<=right;++cx)
+            for(const std::size_t index:collisionBuckets_[static_cast<std::size_t>(cy*collisionGridColumns_+cx)]) {
+                if(collisionVisitStamp_[index]==collisionQueryStamp_)continue;
+                collisionVisitStamp_[index]=collisionQueryStamp_;
+                if(index<room_->instances.size()&&collidesWith(room_->instances[index]))return true;
+            }
+    }
+#else
     for(const std::size_t index:collisionIndices_)
         if(index<room_->instances.size() && collidesWith(room_->instances[index]))return true;
+#endif
     // Runtime effects normally are not structural, but preserve exact
     // behaviour if a room ever spawns a collision object dynamically.
     for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index)
@@ -563,6 +628,20 @@ void Game::moveAxis(float& coordinate, float amount, bool horizontal) {
 
 bool Game::touchesObject(const std::string& name) {
     const auto player = playerBounds(player_.x, player_.y);
+#ifdef __PSP__
+    if(name=="obj_next") {
+        for(const std::size_t index:nextIndices_)
+            if(index<room_->instances.size()) {
+                const auto& instance=room_->instances[index];
+                if(instance.active&&instanceCollision(player,instance))return true;
+            }
+        for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index) {
+            const auto& instance=room_->instances[index];
+            if(instance.active&&inherits(instance.object,name)&&instanceCollision(player,instance))return true;
+        }
+        return false;
+    }
+#endif
     return std::any_of(room_->instances.begin(), room_->instances.end(), [&](const InstanceDef& instance) {
         return instance.active && inherits(instance.object, name) && instanceCollision(player, instance);
     });
@@ -572,16 +651,16 @@ bool Game::touchesHazard() {
     const Rectangle player=playerBounds(player_.x,player_.y);
     const auto touches=[&](const InstanceDef& instance) {
         if (!instance.active || instance.type==4) return false;
-        const auto* obj=object(instance.object);
-        if (!obj) return false;
-        const bool runsThings=inherits(instance.object,"obj_evil") || obj->behavior!="none" ||
-                              instance.object=="obj_spike" || instance.object=="obj_spikeinv";
-        return runsThings && instanceCollision(player,instance);
+        return instanceCollision(player,instance);
     };
     for(const std::size_t index:hazardIndices_)
         if(index<room_->instances.size()&&touches(room_->instances[index]))return true;
-    for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index)
-        if(touches(room_->instances[index]))return true;
+    for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index) {
+        const auto& instance=room_->instances[index];
+        const auto* obj=object(instance.object);
+        if(obj&&(inherits(instance.object,"obj_evil")||obj->behavior!="none"||
+                 instance.object=="obj_spike"||instance.object=="obj_spikeinv")&&touches(instance))return true;
+    }
     return false;
 }
 
@@ -659,7 +738,11 @@ void Game::loadRoom(std::size_t index, bool restart) {
 
 void Game::preloadRoomAssets() {
     const auto warmSprite=[&](const std::string& name) {
-        if (!name.empty()) (void)texture(name);
+        if(name.empty())return;
+        auto& loaded=texture(name);
+#ifdef __PSP__
+        for(const auto& frame:loaded.frames)PreloadTexture(frame);
+#endif
     };
     // Thousands of legacy tiles often reference the same tileset. Warm every
     // sprite once instead of hashing the same name once per tile during a room
@@ -681,7 +764,7 @@ void Game::preloadRoomAssets() {
     }
 #endif
     for (const auto& instance:room_->instances) {
-#if defined(__3DS__) || defined(__PSP__)
+#ifdef __3DS__
         if(std::abs(instance.x-camera_.target.x)>kViewWidth/2.0F+96.0F ||
            std::abs(instance.y-camera_.target.y)>kViewHeight/2.0F+96.0F)
             continue;
@@ -758,6 +841,7 @@ void Game::preloadRoomAssets() {
 #endif
     sparkleScratch_.reserve(8);
     spawnScratch_.reserve(32);
+    simulationWorkIndices_.reserve(room_->instances.capacity());
 }
 
 void Game::rebuildGraphicIndex() {
@@ -772,6 +856,12 @@ void Game::rebuildGraphicIndex() {
     graphicBounds_.resize(room_->graphics.size());
     graphicBuckets_.resize(static_cast<std::size_t>(graphicGridColumns_*graphicGridRows_));
     graphicVisitStamp_.resize(room_->graphics.size());
+#ifdef __PSP__
+    preparedGraphics_.clear();
+    preparedGraphics_.resize(room_->graphics.size());
+    std::unordered_map<std::string,Texture2D> preparedSheets;
+    preparedSheets.reserve(8);
+#endif
     visibleGraphicScratch_.reserve(512);
     for(std::size_t index=0;index<room_->graphics.size();++index) {
         const auto& graphic=room_->graphics[index];
@@ -789,6 +879,31 @@ void Game::rebuildGraphicIndex() {
             bounds={graphic.x-radius,graphic.y-radius,radius*2.0F,radius*2.0F};
         }
         graphicBounds_[index]=bounds;
+#ifdef __PSP__
+        Texture2D image{};
+        if(!graphic.sprite.empty()) {
+            const auto found=preparedSheets.find(graphic.sprite);
+            if(found!=preparedSheets.end())image=found->second;
+            else {
+                auto& frames=texture(graphic.sprite).frames;
+                if(!frames.empty())image=frames[0];
+                preparedSheets.emplace(graphic.sprite,image);
+            }
+        }
+        if(image.id) {
+            const float sourceWidth=std::abs(graphic.width)!=0.0F?std::abs(graphic.width):static_cast<float>(image.width);
+            const float sourceHeight=std::abs(graphic.height)!=0.0F?std::abs(graphic.height):static_cast<float>(image.height);
+            const bool flipX=(graphic.width<0)!=(graphic.scaleX<0);
+            const bool flipY=(graphic.height<0)!=(graphic.scaleY<0);
+            constexpr float inset=0.01F;
+            Rectangle source{graphic.u0+inset,graphic.v0+inset,sourceWidth-inset*2,sourceHeight-inset*2};
+            if(flipX)source.width=-source.width;
+            if(flipY)source.height=-source.height;
+            preparedGraphics_[index]={image,source,
+                {graphic.x,graphic.y,sourceWidth*std::abs(graphic.scaleX),sourceHeight*std::abs(graphic.scaleY)},
+                graphic.rotation,gmColour(graphic.colour)};
+        }
+#endif
         const int left=std::clamp(static_cast<int>(std::floor(bounds.x/cellSize)),0,graphicGridColumns_-1);
         const int right=std::clamp(static_cast<int>(std::floor((bounds.x+std::max(0.0F,bounds.width-0.001F))/cellSize)),0,graphicGridColumns_-1);
         const int top=std::clamp(static_cast<int>(std::floor(bounds.y/cellSize)),0,graphicGridRows_-1);
@@ -803,6 +918,8 @@ void Game::rebuildCollisionIndex() {
     collisionIndices_.clear();
     slopeIndices_.clear();
     simulationIndices_.clear();
+    interactionIndices_.clear();
+    nextIndices_.clear();
     animationIndices_.clear();
     hazardIndices_.clear();
     lightIndices_.clear();
@@ -821,6 +938,8 @@ void Game::rebuildCollisionIndex() {
             instance.object=="obj_trailball" || instance.object=="obj_trailchair" || instance.object=="obj_blink" ||
             instance.object=="obj_jumpsmoke" || instance.object=="obj_wallsmoke" || instance.object=="obj_sparkle";
         if(pickup || effect || (obj && obj->behavior!="none"))simulationIndices_.push_back(i);
+        if(pickup||instance.object.starts_with("obj_placa"))interactionIndices_.push_back(i);
+        if(inherits(instance.object,"obj_next"))nextIndices_.push_back(i);
         // Pickups and bosses can start animating after their index is built.
         if(obj) {
             const auto* visual=sprite(instance.spriteOverride.empty()?obj->sprite:instance.spriteOverride);
@@ -842,6 +961,24 @@ void Game::rebuildCollisionIndex() {
             lightIndices_.push_back(i);
     }
     indexedInstanceCount_=room_->instances.size();
+#ifdef __PSP__
+    constexpr float cellSize=128.0F;
+    collisionGridColumns_=std::max(1,static_cast<int>(std::ceil(room_->width/cellSize)));
+    collisionGridRows_=std::max(1,static_cast<int>(std::ceil(room_->height/cellSize)));
+    collisionBuckets_.clear();
+    collisionBuckets_.resize(static_cast<std::size_t>(collisionGridColumns_*collisionGridRows_));
+    collisionVisitStamp_.assign(room_->instances.size(),0);
+    collisionQueryStamp_=1;
+    for(const std::size_t index:collisionIndices_) {
+        const Rectangle bounds=instanceBounds(room_->instances[index]);
+        const int left=std::clamp(static_cast<int>(std::floor(bounds.x/cellSize)),0,collisionGridColumns_-1);
+        const int right=std::clamp(static_cast<int>(std::floor((bounds.x+std::max(0.0F,bounds.width-0.001F))/cellSize)),0,collisionGridColumns_-1);
+        const int top=std::clamp(static_cast<int>(std::floor(bounds.y/cellSize)),0,collisionGridRows_-1);
+        const int bottom=std::clamp(static_cast<int>(std::floor((bounds.y+std::max(0.0F,bounds.height-0.001F))/cellSize)),0,collisionGridRows_-1);
+        for(int cy=top;cy<=bottom;++cy)for(int cx=left;cx<=right;++cx)
+            collisionBuckets_[static_cast<std::size_t>(cy*collisionGridColumns_+cx)].push_back(index);
+    }
+#endif
 }
 
 void Game::rebuildDrawList() {
@@ -850,6 +987,8 @@ void Game::rebuildDrawList() {
     const float viewLeft=camera_.target.x-kViewWidth/2.0F;
     const float viewTop=camera_.target.y-kViewHeight/2.0F;
 #ifdef __PSP__
+    // The PSP reuses the sorted list for a few frames. Keep a guard band so
+    // camera motion never exposes an unloaded tile or moving instance.
     constexpr float drawGuard=48.0F;
     const Rectangle visibleGraphics{viewLeft-drawGuard,viewTop-drawGuard,
                                     kViewWidth+drawGuard*2,kViewHeight+drawGuard*2};
@@ -1092,8 +1231,8 @@ void Game::updatePlayer() {
     player_.animation += (player_.sprite.ends_with("_run") ? 0.30F : 0.20F);
     sparkleScratch_.clear();
     const Rectangle interactionBounds=playerBounds(player_.x,player_.y);
-    for (auto& instance : room_->instances) {
-        if(!instance.active)continue;
+    const auto interact=[&](InstanceDef& instance) {
+        if(!instance.active)return;
         const bool mainPickup=instance.object=="obj_chocolate" || instance.object=="obj_lollipop" ||
                               instance.object=="obj_pocket" || instance.object=="obj_sock";
         const bool plusPickup=instance.object=="obj_bible" || instance.object=="obj_cruz" ||
@@ -1101,13 +1240,13 @@ void Game::updatePlayer() {
         const bool sign=instance.object.starts_with("obj_placa");
         if(plusMode_ && mainPickup) {
             instance.active = false;
-            continue;
+            return;
         }
         if(plusPickup && !plusMode_) {
             instance.active=false;
-            continue;
+            return;
         }
-        if(!mainPickup && !plusPickup && !sign)continue;
+        if(!mainPickup && !plusPickup && !sign)return;
         const Rectangle objectBounds=instanceBounds(instance);
         const bool pickupTouch=instance.state==0 && CheckCollisionRecs(interactionBounds,objectBounds);
         if (pickupTouch && instance.object == "obj_chocolate") {
@@ -1137,6 +1276,18 @@ void Game::updatePlayer() {
             instance.imageIndex = signTouch ? 1.0F : 0.0F;
             if (signTouch && instance.object.size() > 9) activeSign_ = instance.object.back()-'0';
         }
+    };
+    for(const std::size_t index:interactionIndices_)
+        if(index<room_->instances.size())interact(room_->instances[index]);
+    // Runtime objects normally contain only particles and attacks. Preserve
+    // support for a dynamically-created pickup/sign without scanning all of
+    // the static room furniture every simulation step.
+    for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index) {
+        auto& instance=room_->instances[index];
+        if(instance.object.starts_with("obj_placa")||instance.object=="obj_chocolate"||
+           instance.object=="obj_lollipop"||instance.object=="obj_pocket"||instance.object=="obj_sock"||
+           instance.object=="obj_bible"||instance.object=="obj_cruz"||instance.object=="obj_oil"||
+           instance.object=="obj_vela"||instance.object=="obj_water")interact(instance);
     }
     // The original sign Draw event fades the prompt in by 0.1 per 45 Hz step
     // and immediately resets it while S/down is held.
@@ -1186,7 +1337,7 @@ void Game::updateInstances() {
         if(room_->instances.size()!=oldSize)rebuildCollisionIndex();
     }
     const Rectangle playerHitbox=playerBounds(player_.x,player_.y);
-    const auto distance = [&](const InstanceDef& i) {
+    const auto distanceSquared = [&](const InstanceDef& i) {
         // GameMaker's distance_to_object measures the shortest gap between the
         // two collision boxes, not the distance between instance origins.
         const Rectangle enemy=instanceBounds(i);
@@ -1194,16 +1345,15 @@ void Game::updateInstances() {
                                 playerHitbox.x-(enemy.x+enemy.width),0.0F});
         const float dy=std::max({enemy.y-(playerHitbox.y+playerHitbox.height),
                                 playerHitbox.y-(enemy.y+enemy.height),0.0F});
-        return std::hypot(dx,dy);
+        return dx*dx+dy*dy;
     };
     spawnScratch_.clear();
-    std::size_t simulationCursor=0;
-    for (std::size_t instanceIndex=0;instanceIndex<room_->instances.size();++instanceIndex) {
-        if(instanceIndex<indexedInstanceCount_) {
-            while(simulationCursor<simulationIndices_.size()&&simulationIndices_[simulationCursor]<instanceIndex)
-                ++simulationCursor;
-            if(simulationCursor>=simulationIndices_.size()||simulationIndices_[simulationCursor]!=instanceIndex)continue;
-        }
+    simulationWorkIndices_.clear();
+    simulationWorkIndices_.insert(simulationWorkIndices_.end(),simulationIndices_.begin(),simulationIndices_.end());
+    for(std::size_t index=indexedInstanceCount_;index<room_->instances.size();++index)
+        simulationWorkIndices_.push_back(index);
+    for (const std::size_t instanceIndex:simulationWorkIndices_) {
+        if(instanceIndex>=room_->instances.size())continue;
         auto& i=room_->instances[instanceIndex];
         if (!i.active) continue;
         const auto* obj = object(i.object);
@@ -1262,9 +1412,10 @@ void Game::updateInstances() {
             continue;
         }
         if (obj->behavior == "none") continue;
-        const float dist = distance(i);
+        const float distSquared = distanceSquared(i);
+        const float rangeSquared = i.range*i.range;
         if (obj->behavior == "eslide" || obj->behavior == "eslide_boss") {
-            if (dist < i.range && i.state == 0) {
+            if (distSquared < rangeSquared && i.state == 0) {
                 i.direction = obj->behavior == "eslide_boss" ? 1.0F : -sign(player_.hsp);
                 i.state = 1;
                 i.imageIndex = 1;
@@ -1275,24 +1426,30 @@ void Game::updateInstances() {
             if (i.object=="obj_car") i.scaleX=i.x>player_.x ? -std::abs(i.scaleX) : std::abs(i.scaleX);
             if (i.state == 1 && i.object=="obj_chair") spawnScratch_.push_back(makeInstance("obj_trailchair",i.x,i.y));
         } else if (obj->behavior == "efall") {
-            if (i.state == 0 && dist < i.range) { i.state = 1; i.imageIndex = 1; }
+            if (i.state == 0 && distSquared < rangeSquared) { i.state = 1; i.imageIndex = 1; }
             if (i.state == 1) { i.imageIndex=1; i.imageSpeed=0; }
             if (i.state == 1) {
                 const float oldY = i.y;
                 i.y += i.verticalSpeed;
                 const Rectangle bounds = instanceBounds(i);
-                for (const auto& wall : room_->instances) {
-                    if (&wall != &i && wall.active && inherits(wall.object, "obj_colision") &&
-                        CheckCollisionRecs(bounds, instanceBounds(wall))) { i.active = false; break; }
+                for (const std::size_t wallIndex:collisionIndices_) {
+                    if(wallIndex==instanceIndex||wallIndex>=room_->instances.size())continue;
+                    const auto& wall=room_->instances[wallIndex];
+                    if(wall.active&&CheckCollisionRecs(bounds,instanceBounds(wall))){i.active=false;break;}
+                }
+                for(std::size_t wallIndex=indexedInstanceCount_;i.active&&wallIndex<room_->instances.size();++wallIndex) {
+                    const auto& wall=room_->instances[wallIndex];
+                    if(wallIndex!=instanceIndex&&wall.active&&inherits(wall.object,"obj_colision")&&
+                       CheckCollisionRecs(bounds,instanceBounds(wall))){i.active=false;break;}
                 }
                 if (!i.active) i.y = oldY;
             }
         } else if (obj->behavior == "efollow") {
-            if (dist < i.range && i.state == 0) i.state = 1;
+            if (distSquared < rangeSquared && i.state == 0) i.state = 1;
             if (i.state == 1 && ++i.timer > 60) { i.state = 2; i.timer = 0; i.imageIndex = 1; }
             if (i.state == 2) {
                 i.imageIndex=1;i.imageSpeed=0;
-                if (dist > i.range) { i.state = 0; i.imageIndex = 0; }
+                if (distSquared > rangeSquared) { i.state = 0; i.imageIndex = 0; }
                 else {
                     const float angle = std::atan2(player_.y - i.y, player_.x - i.x);
                     i.x += std::cos(angle) * 2.0F; i.y += std::sin(angle) * 2.0F;
@@ -1300,7 +1457,7 @@ void Game::updateInstances() {
             }
             if (i.state==1 || i.state==2) i.imageAngle=std::sin(stepCounter_*0.12F)*9.0F;
         } else if (obj->behavior == "ethrow" || obj->behavior == "ethrow_range") {
-            if (obj->behavior == "ethrow_range" && i.state == -1 && dist < i.range) i.state = 0;
+            if (obj->behavior == "ethrow_range" && i.state == -1 && distSquared < rangeSquared) i.state = 0;
             if (i.state == 0) {
                 if (obj->behavior == "ethrow_range") { i.imageIndex=1;i.imageSpeed=0; }
                 const float angle = std::atan2(player_.y - i.y, player_.x - i.x);
@@ -1344,9 +1501,9 @@ void Game::updateInstances() {
             std::string spawnName=obj->spawnObject;
             if (i.object=="obj_dish_washer") spawnName=GetRandomValue(0,1) ? "obj_mug" : "obj_dish";
             else if (i.object=="obj_toolbox") spawnName="obj_tools";
-            if (dist < i.range) {i.imageIndex=1;i.imageSpeed=0;}
+            if (distSquared < rangeSquared) {i.imageIndex=1;i.imageSpeed=0;}
             else {i.imageIndex=0;i.imageSpeed=0;}
-            if (dist < i.range && i.timer > obj->spawnRate && !spawnName.empty()) {
+            if (distSquared < rangeSquared && i.timer > obj->spawnRate && !spawnName.empty()) {
                 spawnScratch_.push_back(makeInstance(spawnName, i.x, i.y));
                 i.timer = 0;
                 i.verticalSpeed=5;
@@ -1365,8 +1522,19 @@ void Game::updateInstances() {
         } else if (obj->behavior == "trash_ball") {
             i.x += i.speed; i.imageAngle -= 5;
             const float oldY = i.y; i.y += 2;
-            for (const auto& wall : room_->instances) if (&wall != &i && wall.active && inherits(wall.object,"obj_colision") &&
-                CheckCollisionRecs(instanceBounds(i), instanceBounds(wall))) { i.y = oldY; break; }
+            const Rectangle bounds=instanceBounds(i);
+            bool blocked=false;
+            for(const std::size_t wallIndex:collisionIndices_) {
+                if(wallIndex==instanceIndex||wallIndex>=room_->instances.size())continue;
+                const auto& wall=room_->instances[wallIndex];
+                if(wall.active&&CheckCollisionRecs(bounds,instanceBounds(wall))){blocked=true;break;}
+            }
+            for(std::size_t wallIndex=indexedInstanceCount_;!blocked&&wallIndex<room_->instances.size();++wallIndex) {
+                const auto& wall=room_->instances[wallIndex];
+                if(wallIndex!=instanceIndex&&wall.active&&inherits(wall.object,"obj_colision")&&
+                   CheckCollisionRecs(bounds,instanceBounds(wall)))blocked=true;
+            }
+            if(blocked)i.y=oldY;
         } else if (obj->behavior == "eye_left") {
             if (i.timer++ == 0) i.direction = std::atan2(player_.y-i.y, player_.x-i.x);
             i.x += std::cos(i.direction)*i.speed; i.y += std::sin(i.direction)*i.speed;
@@ -1581,7 +1749,7 @@ void Game::update() {
         }
         if (paused_) {
             const int pauseCount=
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__PSP__)
                 4;
 #else
                 5;
@@ -1593,7 +1761,7 @@ void Game::update() {
                 102 && mouse.x<=282
 #endif
             ) for (int i=0;i<pauseCount;++i) {
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__PSP__)
                 static constexpr float touchRows[]={72,96,120,168};
                 const float row=touchRows[i];
 #else
@@ -1610,7 +1778,7 @@ void Game::update() {
                     if (!plusMode_) haveSlide_ = haveDash_ = haveBlink_ = false;
                     paused_ = false; go("rm_0");
                 }
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__PSP__)
                 else if (pauseSelection_ == 2) { paused_ = false; menuSelection_ = 0; go("rm_menu"); }
                 else if (pauseSelection_ == 3) {
 #else
@@ -1745,6 +1913,16 @@ void Game::drawWorld() {
             // Legacy graphic tiles form the floor, walls and ceiling.
             Set3DStereoLayer(stereoStructureAndPlayer);
 #endif
+#ifdef __PSP__
+            // The guarded draw list is reused across camera movement. Reject
+            // its off-screen margin before doing any texture work, then submit
+            // the precomputed tile data without per-frame string hashes or
+            // source/destination reconstruction.
+            if(!CheckCollisionRecs(graphicBounds_[item.index],visibleView))continue;
+            const auto& prepared=preparedGraphics_[item.index];
+            if(prepared.image.id)
+                DrawTexturePro(prepared.image,prepared.source,prepared.destination,{0,0},prepared.rotation,prepared.tint);
+#else
             const auto& g=room_->graphics[item.index];
             // Compatibility asset layers are GameMaker's legacy tiles. Their
             // x/y is the top-left of the cropped tile, independent of the
@@ -1767,6 +1945,7 @@ void Game::drawWorld() {
                 Rectangle dst{g.x,g.y,sourceWidth*std::abs(g.scaleX),sourceHeight*std::abs(g.scaleY)};
                 DrawTexturePro(image, src, dst, {0,0}, g.rotation, gmColour(g.colour));
             }
+#endif
         } else {
             const auto& instance=room_->instances[item.index];
             const auto* obj = object(instance.object);
@@ -1897,6 +2076,9 @@ void Game::draw() {
     camera_.target={mix(previousCameraTarget_.x,camera_.target.x,renderAlpha_),
                     mix(previousCameraTarget_.y,camera_.target.y,renderAlpha_)};
 #ifdef __PSP__
+    // Membership and depth order rarely change every rendered frame. Re-query
+    // when the camera enters another 32-pixel cell or at a bounded cadence for
+    // newly activated/spawned objects; positions still interpolate every frame.
     const int drawCellX=static_cast<int>(std::floor(camera_.target.x/32.0F));
     const int drawCellY=static_cast<int>(std::floor(camera_.target.y/32.0F));
     if(!drawListValid_ || drawCellX!=drawListCameraCellX_ || drawCellY!=drawListCameraCellY_ ||
@@ -2058,18 +2240,30 @@ void Game::draw() {
 #ifndef __3DS__
         DrawRectangle(0, 0, kViewWidth, kViewHeight, Fade(BLACK, 0.75F));
         drawSprite("spr_pause", (float)language_, 190, 110, 1, 1, 0, 0xFFFFFFFF);
+#ifdef __PSP__
+        const char* en[] = {"Resume","Reset","Menu",""};
+        const char* pt[] = {"Continuar","Reiniciar","Menu",""};
+        static constexpr float pauseRows[]={72,96,120,168};
+        constexpr int pauseItems=4;
+#else
         const char* en[] = {"Resume","Reset","Fullscreen","Menu",""};
         const char* pt[] = {"Continuar","Reiniciar","Tela cheia","Menu",""};
-        for (int i=0;i<5;++i) {
+        constexpr int pauseItems=5;
+#endif
+        for (int i=0;i<pauseItems;++i) {
             const char* label = language_ ? pt[i] : en[i];
 #ifdef __PSP__
-            if (i == 2) label = IsWindowFullscreen()
-                ? (language_ ? "Pixel perfeito" : "Pixel perfect")
-                : (language_ ? "Tela cheia" : "Fullscreen");
+            const float row=pauseRows[i];
+#else
+            const float row=72+i*24;
 #endif
-            text(label, 192-textWidth(label,12)/2, 72+i*24-6, 12);
+            text(label, 192-textWidth(label,12)/2, row-6, 12);
         }
+#ifdef __PSP__
+        drawSprite("spr_longarrow", 0, 129, pauseRows[pauseSelection_], 1, 1, 0, 0xFFFFFFFF);
+#else
         drawSprite("spr_longarrow", 0, 129, (float)(72+pauseSelection_*24), 1, 1, 0, 0xFFFFFFFF);
+#endif
         drawSprite("spr_sound", muted_ ? 1.0F : 0.0F, 192, 167, 1, 1, 0, 0xFFFFFFFF);
 #endif
     }

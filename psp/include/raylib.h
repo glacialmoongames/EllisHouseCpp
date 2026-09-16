@@ -4,3 +4,4 @@
 
 // PSP display mode exposed to the shared pause menu.
 bool IsWindowFullscreen();
+void PreloadTexture(Texture2D texture);

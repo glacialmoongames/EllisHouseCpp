@@ -20,7 +20,7 @@ for line in lines:
         sprites[f[1]]=f[12].split(';')
         paths.update(p for p in sprites[f[1]] if p)
     elif f[0]=='FONT': paths.add(f[2])
-    elif f[0]=='SOUND': sounds.append(f[2])
+    elif f[0]=='SOUND' and f[1].startswith('sfx_'): sounds.append(f[2])
 shutil.copyfile(root/'assets/game.manifest',out/'GAME.MANIFEST')
 assets=[]
 parts=[]
@@ -57,6 +57,10 @@ for path in sounds:
         samples=np.column_stack([np.interp(positions,np.arange(len(samples)),samples[:,c]) for c in range(2)])
     pcm=np.clip(np.rint(samples*32767),-32768,32767).astype('<i2')
     pcm.tofile(out/(Path(path).stem.upper()+'.PCM'))
+# Remove music left by an older asset build. The PSP port deliberately ships
+# only resident sound effects, avoiding both package bloat and stream I/O.
+for stale in out.glob('SND_*.PCM'):
+    stale.unlink()
 # The icon is the same artwork as the 3DS, without rescaling its source pixels.
 icon=Image.open(root/'3ds/meta/icon.png').convert('RGBA')
 icon.save(port/'meta/ICON0.PNG')

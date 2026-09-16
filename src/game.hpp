@@ -27,7 +27,17 @@ private:
         std::string sprite{"spr_player_idle"};
     };
     struct TextureFrames { std::vector<Texture2D> frames; };
-    struct CollisionMask { int width{}, height{}; std::vector<unsigned char> solid; };
+    struct CollisionMask {
+        int width{}, height{};
+        std::vector<unsigned char> solid;
+#ifdef __PSP__
+        int wordsPerRow{};
+        std::vector<std::uint32_t> rowBits;
+#endif
+    };
+#ifdef __PSP__
+    struct PreparedGraphic { Texture2D image{}; Rectangle source{}, destination{}; float rotation{}; Color tint{}; };
+#endif
     enum class DrawKind : unsigned char { Background, Graphic, Instance, Player };
     struct DrawItem { int depth{}; DrawKind kind{}; std::size_t index{}; };
     struct InputPulse {
@@ -81,14 +91,26 @@ private:
     int chocolates_{}, deaths_{};
     std::vector<DrawItem> drawScratch_;
     std::vector<Rectangle> graphicBounds_;
+#ifdef __PSP__
+    std::vector<PreparedGraphic> preparedGraphics_;
+#endif
     std::vector<std::vector<std::size_t>> graphicBuckets_;
     std::vector<std::uint32_t> graphicVisitStamp_;
     std::vector<std::size_t> visibleGraphicScratch_;
     std::uint32_t graphicQueryStamp_{1};
     int graphicGridColumns_{}, graphicGridRows_{};
     std::vector<std::size_t> collisionIndices_;
+#ifdef __PSP__
+    std::vector<std::vector<std::size_t>> collisionBuckets_;
+    std::vector<std::uint32_t> collisionVisitStamp_;
+    std::uint32_t collisionQueryStamp_{1};
+    int collisionGridColumns_{}, collisionGridRows_{};
+#endif
     std::vector<std::size_t> slopeIndices_;
     std::vector<std::size_t> simulationIndices_;
+    std::vector<std::size_t> simulationWorkIndices_;
+    std::vector<std::size_t> interactionIndices_;
+    std::vector<std::size_t> nextIndices_;
     std::vector<std::size_t> animationIndices_;
     std::vector<std::size_t> hazardIndices_;
     std::vector<std::size_t> lightIndices_;

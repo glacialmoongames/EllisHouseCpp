@@ -124,7 +124,7 @@ behavior_ids={"eslide":1,"eslide_boss":2,"efall":3,"efollow":4,"ethrow":5,
               "eye_right":10,"boss_car":11}
 popup_source=rgba("spr_popup").crop((6,0,246,77))
 popup_colours=[]
-for pixel in popup_source.getdata():
+for pixel in popup_source.get_flattened_data():
     colour=pixel[:3]
     if colour not in popup_colours: popup_colours.append(colour)
 assert len(popup_colours)<=7
@@ -193,7 +193,7 @@ for room in rooms:
             image=image.crop(box)
             quant=image.convert("RGB").quantize(palette=palette_image,dither=Image.Dither.NONE)
             alpha=image.getchannel("A")
-            enemy_pixels.extend(0 if a==0 else c+1 for c,a in zip(quant.getdata(),alpha.getdata()))
+            enemy_pixels.extend(0 if a==0 else c+1 for c,a in zip(quant.get_flattened_data(),alpha.get_flattened_data()))
             for yy in range(image.height):
                 row=alpha.crop((0,yy,image.width,yy+1)).getbbox()
                 enemy_spans.extend(struct.pack("<HH",row[0] if row else 0xffff,row[2] if row else 0))
@@ -277,7 +277,7 @@ for room in rooms:
             paste_instance(hazard,inst,True)
     def add_mask(image,target):
         alpha=image.getchannel("A"); packed=bytearray((w*h+7)//8)
-        for n,v in enumerate(alpha.getdata()):
+        for n,v in enumerate(alpha.get_flattened_data()):
             if v: packed[n>>3] |= 1<<(n&7)
         off=len(target); target.extend(packed); return off
     col_off=add_mask(solid,collision_bits); plat_off=add_mask(one_way,platform_bits); hazard_off=add_mask(hazard,hazard_bits)
@@ -304,7 +304,7 @@ for n in range(15):
     r,g,b=pp[n*3:n*3+3]; obj_palette.append((r>>3)|((g>>3)<<5)|((b>>3)<<10))
 obj_tiles=bytearray()
 for fi,im in enumerate(frames):
-    crop=pq.crop((fi*32,0,fi*32+32,32)); pix=list(crop.getdata()); alpha=list(im.getchannel("A").getdata())
+    crop=pq.crop((fi*32,0,fi*32+32,32)); pix=list(crop.get_flattened_data()); alpha=list(im.getchannel("A").get_flattened_data())
     vals=[0 if alpha[n]==0 else pix[n]+1 for n in range(1024)]
     for ty in range(0,32,8):
         for tx in range(0,32,8):
@@ -322,7 +322,7 @@ for name in ("spr_trail","spr_trailslide"):
         source=Image.open(PROJECT/path).convert("RGBA")
         cell=Image.new("RGBA",(32,32),(0,0,0,0));cell.alpha_composite(source,(5,3))
         values=[]
-        for rr,gg,bb,aa in cell.getdata():
+        for rr,gg,bb,aa in cell.get_flattened_data():
             if not aa: values.append(0);continue
             nearest=min(range(15),key=lambda n:(rr-player_colours[n][0])**2+(gg-player_colours[n][1])**2+(bb-player_colours[n][2])**2)
             values.append(nearest+1)
@@ -424,7 +424,7 @@ for suffix in title_suffixes:
 # RGB555 values are deterministic and exactly match the source conversion.
 title_colours=[]
 for image in title_images:
-    for rr,gg,bb,aa in image.getdata():
+    for rr,gg,bb,aa in image.get_flattened_data():
         colour=(rr,gg,bb)
         if aa and colour not in title_colours:title_colours.append(colour)
 if len(title_colours)>159:raise RuntimeError("titulos excedem a paleta OBJ reservada")
@@ -435,7 +435,7 @@ title_palette=[0]+[rgb555_nearest(rr,gg,bb) for rr,gg,bb in title_colours]
 title_palette += [0]*(160-len(title_palette))
 title_tiles=bytearray();title_meta=[]
 for i,image in enumerate(title_images):
-    values=[0 if aa==0 else title_colour_index[(rr,gg,bb)]+96 for rr,gg,bb,aa in image.getdata()]
+    values=[0 if aa==0 else title_colour_index[(rr,gg,bb)]+96 for rr,gg,bb,aa in image.get_flattened_data()]
     offset=len(title_tiles)
     for block in range(3):
         for ty in range(0,64,8):
@@ -461,7 +461,7 @@ for number in range(1,7):
 dialog_bytes=bytearray(); popup_index={c:248+i for i,c in enumerate(popup_colours)}
 for message in texts_en:
     panel=popup_source.copy(); draw_project_text(panel,message,120,1)
-    for pixel in panel.getdata():
+    for pixel in panel.get_flattened_data():
         colour=pixel[:3]
         dialog_bytes.append(0 if colour==(0,0,0) else popup_index[colour])
 
@@ -471,7 +471,7 @@ draw_project_text(button,"S",8.5,4)
 b_rgb=Image.new("RGB",button.size,(0,0,0)); b_rgb.paste(button.convert("RGB"),mask=button.getchannel("A"))
 bq=b_rgb.quantize(colors=15,dither=Image.Dither.NONE); bp=(bq.getpalette() or [])[:45]; bp += [0]*(45-len(bp))
 button_pal=[0]+[((bp[n*3]>>3)|((bp[n*3+1]>>3)<<5)|((bp[n*3+2]>>3)<<10)) for n in range(15)]
-button_vals=[0 if a==0 else c+1 for c,a in zip(bq.getdata(),button.getchannel("A").getdata())]
+button_vals=[0 if a==0 else c+1 for c,a in zip(bq.get_flattened_data(),button.getchannel("A").get_flattened_data())]
 button_tiles=bytearray()
 for ty in (0,8):
   for tx in (0,8):
@@ -484,7 +484,7 @@ sign_im=rgba("spr_placa",1)
 s_rgb=Image.new("RGB",sign_im.size,(0,0,0)); s_rgb.paste(sign_im.convert("RGB"),mask=sign_im.getchannel("A"))
 sq=s_rgb.quantize(colors=15,dither=Image.Dither.NONE); sp=(sq.getpalette() or [])[:45]; sp += [0]*(45-len(sp))
 sign_pal=[0]+[((sp[n*3]>>3)|((sp[n*3+1]>>3)<<5)|((sp[n*3+2]>>3)<<10)) for n in range(15)]
-sign_vals=[0 if a==0 else c+1 for c,a in zip(sq.getdata(),sign_im.getchannel("A").getdata())]
+sign_vals=[0 if a==0 else c+1 for c,a in zip(sq.get_flattened_data(),sign_im.getchannel("A").get_flattened_data())]
 sign_tiles=bytearray()
 for ty in (0,8):
   for tx in (0,8):
@@ -502,7 +502,7 @@ pickup_pal=[0]+[((pickup_p[n*3]>>3)|((pickup_p[n*3+1]>>3)<<5)|((pickup_p[n*3+2]>
 pickup_tiles=bytearray()
 for i in range(4):
     image=pickup_strip.crop((i*16,0,i*16+16,16)); quant=pickup_q.crop((i*16,0,i*16+16,16))
-    values=[0 if a==0 else c+1 for c,a in zip(quant.getdata(),image.getchannel("A").getdata())]
+    values=[0 if a==0 else c+1 for c,a in zip(quant.get_flattened_data(),image.getchannel("A").get_flattened_data())]
     for ty in (0,8):
       for tx in (0,8):
         for y in range(8):
@@ -522,7 +522,7 @@ paint_tiles=bytearray();paint_frame_tiles=[]
 for image,x in zip(paint_frames,paint_x):
     frame_start=len(paint_tiles)
     quant=paint_q.crop((x,0,x+image.width,image.height))
-    values=[0 if a==0 else c+1 for c,a in zip(quant.getdata(),image.getchannel("A").getdata())]
+    values=[0 if a==0 else c+1 for c,a in zip(quant.get_flattened_data(),image.getchannel("A").get_flattened_data())]
     for ty in range(0,image.height,8):
       for tx in range(0,image.width,8):
         for yy in range(8):
@@ -544,7 +544,7 @@ bq=brgb.quantize(colors=15,method=Image.Quantize.MEDIANCUT,dither=Image.Dither.N
 bossbar_palette=[0]+[((bp[n*3]>>3)|((bp[n*3+1]>>3)<<5)|((bp[n*3+2]>>3)<<10)) for n in range(15)]
 bossbar_tiles=bytearray();bossbar_meta=[]
 for image,x in zip(bar_parts,bxs):
-    first=608+len(bossbar_tiles)//32;quant=bq.crop((x,0,x+image.width,image.height));vals=[0 if a==0 else c+1 for c,a in zip(quant.getdata(),image.getchannel("A").getdata())]
+    first=608+len(bossbar_tiles)//32;quant=bq.crop((x,0,x+image.width,image.height));vals=[0 if a==0 else c+1 for c,a in zip(quant.get_flattened_data(),image.getchannel("A").get_flattened_data())]
     for ty in range(0,image.height,8):
       for tx in range(0,image.width,8):
         for yy in range(8):
@@ -565,7 +565,7 @@ for rotated in trash_rotated:
     cell=Image.new("RGBA",(trash_rot_w,trash_rot_h),(0,0,0,0))
     cell.alpha_composite(rotated,((trash_rot_w-rotated.width)//2,(trash_rot_h-rotated.height)//2))
     quant=cell.convert("RGB").quantize(palette=boss_palette_image,dither=Image.Dither.NONE)
-    alpha=cell.getchannel("A");values=bytes(0 if aa==0 else cc+1 for cc,aa in zip(quant.getdata(),alpha.getdata()))
+    alpha=cell.getchannel("A");values=bytes(0 if aa==0 else cc+1 for cc,aa in zip(quant.get_flattened_data(),alpha.get_flattened_data()))
     trash_rot_pixels.extend(values)
     for yy in range(trash_rot_h):
         span=alpha.crop((0,yy,trash_rot_w,yy+1)).getbbox()
@@ -594,7 +594,7 @@ for name in kitchen_names:
     first_tile=tile_base+len(kitchen_tiles)//32;frame_tiles=cw*ch//64
     for frame in range(len(s["paths"])):
         image=kitchen_cells[cell_index];quant=kq.crop((kxs[cell_index],0,kxs[cell_index]+cw,ch));cell_index+=1
-        vals=[0 if a==0 else c+1 for c,a in zip(quant.getdata(),image.getchannel("A").getdata())]
+        vals=[0 if a==0 else c+1 for c,a in zip(quant.get_flattened_data(),image.getchannel("A").get_flattened_data())]
         for ty in range(0,ch,8):
           for tx in range(0,cw,8):
             for yy in range(8):
@@ -606,7 +606,7 @@ if tile_base+len(kitchen_tiles)//32>1024:raise RuntimeError("sprites de hardware
 skull=rgba("spr_cavera"); skull_rgb=Image.new("RGB",skull.size,(0,0,0)); skull_rgb.paste(skull.convert("RGB"),mask=skull.getchannel("A"))
 skull_q=skull_rgb.quantize(colors=15,dither=Image.Dither.NONE); hp=(skull_q.getpalette() or [])[:45]; hp += [0]*(45-len(hp))
 skull_pal=[0]+[((hp[n*3]>>3)|((hp[n*3+1]>>3)<<5)|((hp[n*3+2]>>3)<<10)) for n in range(15)]
-skull_values=[0 if a==0 else c+1 for c,a in zip(skull_q.getdata(),skull.getchannel("A").getdata())]
+skull_values=[0 if a==0 else c+1 for c,a in zip(skull_q.get_flattened_data(),skull.getchannel("A").get_flattened_data())]
 skull_tiles=bytearray()
 for ty in (0,8):
   for tx in (0,8):
