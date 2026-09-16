@@ -15,11 +15,22 @@
   <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
   <div id="status">Loading Elli's House…</div>
   <script>
-    var Module={canvas:document.getElementById('canvas'),setStatus:function(value){
+    var buildId=new URLSearchParams(location.search).get('build')||'';
+    var cacheSuffix=buildId?'?build='+encodeURIComponent(buildId):'';
+    var Module={canvas:document.getElementById('canvas'),locateFile:function(path,prefix){
+      return (prefix||'')+path+cacheSuffix;
+    },setStatus:function(value){
       var status=document.getElementById('status');status.textContent=value||'';status.hidden=!value;
     }};
     addEventListener('click',function(){Module.canvas.focus()},{once:true});
   </script>
-  {{{ SCRIPT }}}
+  <template id="game-script">{{{ SCRIPT }}}</template>
+  <script>
+    var generatedScript=document.getElementById('game-script').content.querySelector('script');
+    var gameScript=document.createElement('script');
+    gameScript.async=true;
+    gameScript.src=generatedScript.getAttribute('src')+cacheSuffix;
+    document.body.appendChild(gameScript);
+  </script>
 </body>
 </html>
