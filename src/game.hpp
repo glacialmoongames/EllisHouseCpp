@@ -18,7 +18,7 @@ private:
     struct Player {
         float x{}, y{}, hsp{}, vsp{}, animation{}, facing{1};
         float previousX{}, previousY{};
-        int coyote{}, wallCoyote{}, wallCoyoteSide{}, jumpBuffer{}, dashFrames{}, blinkFrames{}, slopeAnimationGrace{}, slideGroundGrace{};
+        int coyote{}, wallCoyote{}, wallCoyoteSide{}, jumpBuffer{}, dashBuffer{}, dashFrames{}, blinkFrames{}, slopeAnimationGrace{}, slideGroundGrace{};
         int deathTimer{};
         int wallLock{};
         int blinkSoundCooldown{};
@@ -41,7 +41,7 @@ private:
     enum class DrawKind : unsigned char { Background, Graphic, Instance, Player };
     struct DrawItem { int depth{}; DrawKind kind{}; std::size_t index{}; };
     struct InputPulse {
-        bool up{}, down{}, confirm{}, jump{}, click{}, escape{}, restart{}, collision{};
+        bool up{}, down{}, confirm{}, jump{}, dash{}, click{}, escape{}, restart{}, collision{};
         Vector2 mouse{-1000,-1000};
     };
 

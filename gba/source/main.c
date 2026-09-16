@@ -54,7 +54,7 @@ typedef struct {
     int32_t previous_x,previous_y;
     int16_t camera_x,camera_y,previous_camera_x,previous_camera_y;
     uint16_t keys,pressed_latch;
-    uint8_t room,on_ground,facing,anim_tick,frame,group,dash,sign,jump_buffer,coyote,dead,death_timer;
+    uint8_t room,on_ground,facing,anim_tick,frame,group,dash,sign,jump_buffer,dash_buffer,coyote,dead,death_timer;
     uint8_t have_slide,have_dash,have_blink,sliding,low_profile,dash_spent,blink_left;
     uint8_t blinking;
     uint8_t chocolates,room_start_chocolates,deaths;
@@ -373,7 +373,7 @@ static void load_room(uint8_t id,int restart) {
     g.room=id; const RoomAsset* r=&room_assets[id];
     g.x=(int32_t)r->start_x<<8; g.y=(int32_t)r->start_y<<8;g.previous_x=g.x;g.previous_y=g.y;
     g.vx=g.vy=0; g.camera_x=g.camera_y=g.previous_camera_x=g.previous_camera_y=0; g.frame=group_start[0]; g.group=0;
-    g.jump_buffer=g.coyote=0; g.pressed_latch=0; g.dead=g.death_timer=0;g.paused=g.ending=0;
+    g.jump_buffer=g.dash_buffer=g.coyote=0; g.pressed_latch=0; g.dead=g.death_timer=0;g.paused=g.ending=0;
     g.wall_lock=0;g.wall_push=0;g.wall_coyote=0;g.wall_coyote_side=0;g.slope_anim_grace=0;g.blink_effect_timer=0;g.paint_variants_loaded=0;loaded_trail_frame=255;
     g.title_timer=(!restart&&id<ROOM_COUNT-1)?50:0;
     g.pickup_collected=0; g.sliding=0; g.low_profile=0; g.dash_spent=0; g.blinking=0; g.blink_left=(id==ROOM_COUNT-1)?15:30;
@@ -464,6 +464,8 @@ static void update(void) {
     if(g.on_ground) g.coyote=6;
     else if(g.coyote) --g.coyote;
     if(press&KEY_A) g.jump_buffer=4;
+    if(press&KEY_B) g.dash_buffer=5;
+    else if(g.dash_buffer) --g.dash_buffer;
     /* Do not stand up or walk Elli into a ceiling after a slide. */
     if(g.low_profile&&!down&&player_hits_shape(r,wx,wy,0)) requested_vx=0;
     int locked=g.wall_lock!=0;
@@ -479,7 +481,10 @@ static void update(void) {
     }
     if(g.vx) g.facing=g.vx<0;
     if(g.on_ground || player_hits(r,wx+2,wy) || player_hits(r,wx-2,wy)) g.dash_spent=0;
-    if(!g.dash && (press&KEY_B) && g.vx && !g.on_ground && g.have_dash && !g.dash_spent) g.dash=11;
+    if(!g.dash && g.dash_buffer && g.vx && !g.on_ground && g.have_dash && !g.dash_spent) {
+        g.dash=11;
+        g.dash_buffer=0;
+    }
     if(g.dash) {
         add_player_trail(0);
         g.vx=(g.facing?-1:1)*2560; g.vy=0;

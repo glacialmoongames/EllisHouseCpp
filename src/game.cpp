@@ -261,6 +261,15 @@ void Game::pollInput() {
 #else
                    IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 #endif
+    input_.dash |= IsKeyPressed(KEY_W)
+#if !defined(__3DS__) && !defined(__PSP__)
+                   || IsKeyPressed(KEY_UP)
+                   || IsGamepadButtonPressed(0,GAMEPAD_BUTTON_LEFT_FACE_UP)
+                   || IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_FACE_LEFT)
+                   || IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_FACE_UP)
+                   || IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_TRIGGER_1)
+#endif
+                   ;
     input_.confirm |= IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_LEFT_SHIFT) ||
                       IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_FACE_DOWN) ||
                       IsGamepadButtonPressed(0,GAMEPAD_BUTTON_RIGHT_FACE_RIGHT) ||
@@ -700,7 +709,7 @@ void Game::loadRoom(std::size_t index, bool restart) {
     rebuildCollisionIndex();
     player_.hsp = player_.vsp = player_.animation = 0;
     player_.sprite = playerSprite("spr_player_idle");
-    player_.coyote = player_.wallCoyote = player_.wallCoyoteSide = player_.jumpBuffer =
+    player_.coyote = player_.wallCoyote = player_.wallCoyoteSide = player_.jumpBuffer = player_.dashBuffer =
         player_.dashFrames = player_.slopeAnimationGrace = player_.slideGroundGrace = 0;
     player_.blinkFrames = room_->name == "rm_boss" ? 15 : 30;
     player_.deathTimer = 0;
@@ -1122,6 +1131,10 @@ void Game::updatePlayer() {
     // lost between two fixed simulation steps.
     if (jumpPressed) player_.jumpBuffer = 4;
     else if (player_.jumpBuffer > 0) --player_.jumpBuffer;
+    // Retain a dash press for five simulation frames. Holding the button keeps
+    // the original behavior; the counter only makes short early taps reliable.
+    if (input_.dash) player_.dashBuffer = 5;
+    else if (player_.dashBuffer > 0) --player_.dashBuffer;
 
     const float inputMove = static_cast<float>(right - left);
     const bool slideContact=player_.grounded ||
@@ -1145,9 +1158,10 @@ void Game::updatePlayer() {
     if (player_.lowProfile && !down && collidesWithProfile(player_.x,player_.y,false)) player_.hsp=0;
     if (player_.hsp != 0) player_.facing = sign(player_.hsp);
 
-    if (up && player_.hsp != 0 && !player_.grounded && player_.dashReady && haveDash_) {
+    if ((up || player_.dashBuffer > 0) && player_.hsp != 0 && !player_.grounded && player_.dashReady && haveDash_) {
         player_.dashFrames = 10;
         player_.dashReady = false;
+        player_.dashBuffer = 0;
     }
     if (player_.dashFrames > 0) {
         auto trail=makeInstance("obj_trail",player_.x,player_.y);
