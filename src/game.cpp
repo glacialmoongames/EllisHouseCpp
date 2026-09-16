@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <stdexcept>
@@ -2158,7 +2159,20 @@ void Game::draw() {
 #else
             drawSprite("spr_popup",0,192,109,1,1,0,0xFFFFFFFF);
             const char* message=(language_?pt:en)[activeSign_];
-            text(message,192-textWidth(message,8)/2,72,8,BLACK);
+            constexpr float dialogCenterX=192.0F,dialogCenterY=109.0F,textSize=8.0F;
+            int lineCount=1;
+            for(const char* cursor=message;*cursor;++cursor) if(*cursor=='\n') ++lineCount;
+            float lineY=dialogCenterY-lineCount*textSize/2.0F;
+            const char* line=message;
+            while(*line) {
+                const char* end=std::strchr(line,'\n');
+                const std::string value(line,end?static_cast<std::size_t>(end-line):std::strlen(line));
+                text(value.c_str(),dialogCenterX-textWidth(value.c_str(),textSize)/2.0F,
+                     lineY,textSize,BLACK);
+                lineY+=textSize;
+                if(!end) break;
+                line=end+1;
+            }
 #endif
         } else if (!player_.dropThrough) {
             // Use the same interpolated anchor as the rendered player. This

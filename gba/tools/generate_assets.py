@@ -460,7 +460,9 @@ for number in range(1,7):
     texts_pt.append(blocks[0].replace("\r\n","\n")); texts_en.append(blocks[1].replace("\r\n","\n"))
 dialog_bytes=bytearray(); popup_index={c:248+i for i,c in enumerate(popup_colours)}
 for message in texts_en:
-    panel=popup_source.copy(); draw_project_text(panel,message,120,1)
+    panel=popup_source.copy()
+    text_y=(panel.height-len(message.split("\n"))*8)//2
+    draw_project_text(panel,message,panel.width/2,text_y)
     for pixel in panel.get_flattened_data():
         colour=pixel[:3]
         dialog_bytes.append(0 if colour==(0,0,0) else popup_index[colour])
