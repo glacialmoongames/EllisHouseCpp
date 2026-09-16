@@ -22,6 +22,9 @@
     },setStatus:function(value){
       var status=document.getElementById('status');status.textContent=value||'';status.hidden=!value;
     }};
+    addEventListener('keydown',function(event){
+      if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code)) event.preventDefault();
+    },{capture:true,passive:false});
     addEventListener('click',function(){Module.canvas.focus()},{once:true});
   </script>
   <template id="game-script">{{{ SCRIPT }}}</template>
