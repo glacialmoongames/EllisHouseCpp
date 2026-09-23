@@ -62,7 +62,11 @@
       const availableHeight=fullscreen?innerHeight:stage.clientHeight;
       const ratio=Math.max(1,window.devicePixelRatio||1);
       const fitPhysical=Math.min(availableWidth*ratio/baseWidth,availableHeight*ratio/baseHeight);
-      const physicalScale=fitPhysical>=1?Math.floor(fitPhysical):fitPhysical;
+      // Integer physical scaling keeps desktop pixels exact. On touch screens,
+      // rounding down wastes a large part of narrow high-DPI displays, so use
+      // the full uniform scale and let the pixelated canvas fill the width.
+      const touchLayout=matchMedia('(hover:none) and (pointer:coarse)').matches;
+      const physicalScale=(touchLayout||fitPhysical<1)?fitPhysical:Math.floor(fitPhysical);
       const cssScale=physicalScale/ratio;
       canvas.style.width=(baseWidth*cssScale)+'px';
       canvas.style.height=(baseHeight*cssScale)+'px';
