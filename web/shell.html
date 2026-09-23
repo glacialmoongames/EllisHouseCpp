@@ -2,41 +2,126 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <title>Elli's House</title>
   <style>
-    html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
-    body{display:grid;place-items:center}
-    canvas{width:min(100vw,calc(100vh * 1.76147));height:min(100vh,calc(100vw / 1.76147));image-rendering:pixelated;outline:0}
-    #status{position:fixed;inset:auto 0 18px;text-align:center;color:#eee;font:14px Arial,sans-serif}
+    :root{color-scheme:dark;--controls-height:154px}
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden;overscroll-behavior:none}
+    body{display:flex;flex-direction:column;align-items:center;justify-content:center}
+    #stage{width:100%;min-height:0;flex:1;display:grid;place-items:center;overflow:hidden}
+    canvas{display:block;aspect-ratio:192/109;background:#000;image-rendering:pixelated;image-rendering:crisp-edges;outline:0}
+    canvas:fullscreen{position:fixed!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;margin:0!important;max-width:none!important;max-height:none!important;background:#000}
+    #status{position:fixed;left:0;right:0;bottom:18px;text-align:center;color:#eee;font:14px Arial,sans-serif;pointer-events:none}
+    #touch-controls{display:none;width:min(100%,620px);height:var(--controls-height);padding:8px max(6px,2vw) max(10px,env(safe-area-inset-bottom));gap:clamp(4px,2.5vw,18px);grid-template-columns:minmax(0,1fr) minmax(0,1fr);flex:0 0 auto;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+    .pad,.actions{display:grid;grid-template:repeat(2,minmax(0,1fr))/repeat(3,minmax(0,1fr));gap:clamp(4px,1.5vw,7px);align-items:center;justify-items:center;min-width:0}
+    .control{width:min(100%,56px);height:auto;max-height:56px;aspect-ratio:1;padding:0;min-width:0;border:2px solid #8b6a80;border-radius:13px;background:#382b36;color:#fff;font:700 clamp(14px,5vw,20px) Arial,sans-serif;box-shadow:inset 0 0 0 2px #181218;touch-action:none}
+    .control:active,.control.held{background:#6c4b64;transform:translateY(1px)}
+    .up{grid-area:1/2}.left{grid-area:2/1}.down{grid-area:2/2}.right{grid-area:2/3}
+    .pause{grid-area:1/2;font-size:clamp(9px,3vw,12px)}.dash{grid-area:2/2}.jump{grid-area:2/3}
+    .actions .control{width:min(100%,64px);max-height:64px;font-size:clamp(10px,3.2vw,16px)}
+    @media (hover:none) and (pointer:coarse){
+      body{justify-content:flex-start}
+      #stage{flex:0 0 auto;height:auto;aspect-ratio:192/109}
+      #touch-controls{display:grid}
+      #status{bottom:calc(var(--controls-height) + 12px)}
+    }
   </style>
 </head>
 <body>
-  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+  <div id="touch-controls" aria-label="Touch controls">
+    <div class="pad">
+      <button class="control up" data-code="ArrowUp" data-key="ArrowUp" aria-label="Up">▲</button>
+      <button class="control left" data-code="ArrowLeft" data-key="ArrowLeft" aria-label="Left">◀</button>
+      <button class="control down" data-code="ArrowDown" data-key="ArrowDown" aria-label="Down">▼</button>
+      <button class="control right" data-code="ArrowRight" data-key="ArrowRight" aria-label="Right">▶</button>
+    </div>
+    <div class="actions">
+      <button class="control pause" data-code="Escape" data-key="Escape" aria-label="Pause">PAUSE</button>
+      <button class="control dash" data-code="KeyW" data-key="w" aria-label="Dash">DASH</button>
+      <button class="control jump" data-code="Space" data-key=" " aria-label="Jump">JUMP</button>
+    </div>
+  </div>
   <div id="status">Loading Elli's House…</div>
   <script>
-    var preferredLanguage=(navigator.languages&&navigator.languages[0])||navigator.language||'en';
-    var portuguese=/^pt(?:-|$)/i.test(preferredLanguage);
-    if(portuguese){
+    const canvas=document.getElementById('canvas');
+    const stage=document.getElementById('stage');
+    const baseWidth=384,baseHeight=218;
+    let gameStarted=false;
+
+    const preferredLanguage=(navigator.languages&&navigator.languages[0])||navigator.language||'en';
+    if(/^pt(?:-|$)/i.test(preferredLanguage)){
       document.documentElement.lang='pt-BR';
       document.getElementById('status').textContent="Carregando Elli's House…";
     }
-    var buildId=new URLSearchParams(location.search).get('build')||'';
-    var cacheSuffix=buildId?'?build='+encodeURIComponent(buildId):'';
-    var Module={canvas:document.getElementById('canvas'),locateFile:function(path,prefix){
+
+    function fitCanvas(){
+      const fullscreen=document.fullscreenElement===canvas;
+      const availableWidth=fullscreen?innerWidth:stage.clientWidth;
+      const availableHeight=fullscreen?innerHeight:stage.clientHeight;
+      const ratio=Math.max(1,window.devicePixelRatio||1);
+      const fitPhysical=Math.min(availableWidth*ratio/baseWidth,availableHeight*ratio/baseHeight);
+      const physicalScale=fitPhysical>=1?Math.floor(fitPhysical):fitPhysical;
+      const cssScale=physicalScale/ratio;
+      canvas.style.width=(baseWidth*cssScale)+'px';
+      canvas.style.height=(baseHeight*cssScale)+'px';
+    }
+    new ResizeObserver(fitCanvas).observe(stage);
+    addEventListener('resize',fitCanvas,{passive:true});
+    if(window.visualViewport)visualViewport.addEventListener('resize',fitCanvas,{passive:true});
+    addEventListener('fullscreenchange',()=>requestAnimationFrame(fitCanvas));
+    fitCanvas();
+
+    function blockGameKeys(event){
+      if(gameStarted&&['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))event.preventDefault();
+    }
+    addEventListener('keydown',blockGameKeys,{capture:true,passive:false});
+    canvas.addEventListener('focus',()=>{gameStarted=true});
+
+    const held=new Map();
+    function sendKey(button,down){
+      const code=button.dataset.code,key=button.dataset.key;
+      if(held.get(code)===down)return;
+      held.set(code,down);
+      button.classList.toggle('held',down);
+      const keyCodes={ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,Space:32,KeyW:87,Escape:27};
+      const createEvent=()=>{
+        const event=new KeyboardEvent(down?'keydown':'keyup',{key,code,bubbles:true,cancelable:true});
+        Object.defineProperties(event,{keyCode:{value:keyCodes[code]},which:{value:keyCodes[code]}});
+        return event;
+      };
+      window.dispatchEvent(createEvent());
+      document.dispatchEvent(createEvent());
+      canvas.dispatchEvent(createEvent());
+      canvas.focus({preventScroll:true});
+      gameStarted=true;
+    }
+    document.querySelectorAll('.control').forEach(button=>{
+      button.addEventListener('pointerdown',event=>{
+        event.preventDefault();button.setPointerCapture(event.pointerId);sendKey(button,true);
+      });
+      for(const type of ['pointerup','pointercancel','lostpointercapture'])
+        button.addEventListener(type,event=>{event.preventDefault();sendKey(button,false)});
+    });
+    function releaseControls(){document.querySelectorAll('.control.held').forEach(button=>sendKey(button,false))}
+    addEventListener('blur',releaseControls);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseControls()});
+
+    const buildId=new URLSearchParams(location.search).get('build')||'';
+    const cacheSuffix=buildId?'?build='+encodeURIComponent(buildId):'';
+    var Module={canvas,locateFile:function(path,prefix){
       return (prefix||'')+path+cacheSuffix;
     },setStatus:function(value){
-      var status=document.getElementById('status');status.textContent=value||'';status.hidden=!value;
+      const status=document.getElementById('status');status.textContent=value||'';status.hidden=!value;
+      if(!value){gameStarted=true;canvas.focus({preventScroll:true});fitCanvas()}
     }};
-    addEventListener('keydown',function(event){
-      if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code)) event.preventDefault();
-    },{capture:true,passive:false});
-    addEventListener('click',function(){Module.canvas.focus()},{once:true});
+    addEventListener('pointerdown',function(){canvas.focus({preventScroll:true})},{once:true});
   </script>
   <template id="game-script">{{{ SCRIPT }}}</template>
   <script>
-    var generatedScript=document.getElementById('game-script').content.querySelector('script');
-    var gameScript=document.createElement('script');
+    const generatedScript=document.getElementById('game-script').content.querySelector('script');
+    const gameScript=document.createElement('script');
     gameScript.async=true;
     gameScript.src=generatedScript.getAttribute('src')+cacheSuffix;
     document.body.appendChild(gameScript);
